@@ -18,6 +18,7 @@ struct SlideBarView: View {
     @AppStorage("isDarkMode") private var isDarkMode = false
     private var activeScreen: ActiveScreen?
     private var onNavigate: ((ActiveScreen) -> Void)?
+    private var onLogout: (() -> Void)?
 
     // MARK: - Initialization
     init(
@@ -26,7 +27,8 @@ struct SlideBarView: View {
         username: String,
         avatarUrl: String? = nil,
         activeScreen: ActiveScreen? = nil,
-        onNavigate: ((ActiveScreen) -> Void)? = nil
+        onNavigate: ((ActiveScreen) -> Void)? = nil,
+        onLogout: (() -> Void)? = nil
     ) {
         self._isShowing = isShowing
         self.currentUserName = currentUserName
@@ -34,6 +36,7 @@ struct SlideBarView: View {
         self.avatarUrl = avatarUrl
         self.activeScreen = activeScreen
         self.onNavigate = onNavigate
+        self.onLogout = onLogout
     }
 
     // MARK: - Active Screen
@@ -182,7 +185,9 @@ struct SlideBarView: View {
                             .toggleStyle(SwitchToggleStyle(tint: Color(hex: "#CADDAD")))
                             .foregroundColor(.white)
 
-                            Button(action: {}) {
+                            Button(action: {
+                                onLogout?()
+                            }) {
                                 HStack {
                                     Image(systemName: "rectangle.portrait.and.arrow.right")
                                     Text("Выйти")

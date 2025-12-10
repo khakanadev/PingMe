@@ -3,6 +3,7 @@ import SwiftUI
 // MARK: - Main View
 struct ChatsView: View {
     @State private var viewModel = ChatsViewModel()
+    @Environment(\.routingViewModel) private var routingViewModel
 
     // MARK: - Body View
     var body: some View {
@@ -40,6 +41,11 @@ struct ChatsView: View {
                             if screen == .profile {
                                 viewModel.isEditProfileActive = true
                             }
+                        },
+                        onLogout: {
+                            viewModel.logout()
+                            viewModel.isSlideBarShowing = false
+                            routingViewModel.navigateToScreen(.login)
                         }
                     )
                 }

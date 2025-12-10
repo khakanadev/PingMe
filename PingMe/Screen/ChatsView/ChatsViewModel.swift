@@ -106,4 +106,24 @@ class ChatsViewModel {
     private func reloadUserData() {
         loadUserData()
     }
+
+    // MARK: - Logout
+    func logout() {
+        // Clear all user data
+        UserDefaults.standard.removeObject(forKey: "accessToken")
+        UserDefaults.standard.removeObject(forKey: "refreshToken")
+        UserDefaults.standard.removeObject(forKey: "accessTokenExpiration")
+        UserDefaults.standard.removeObject(forKey: "refreshTokenExpiration")
+        UserDefaults.standard.removeObject(forKey: "userData")
+        UserDefaults.standard.synchronize()
+        
+        // Clear avatar cache
+        ImageCacheService.shared.clearCache()
+        
+        // Reset user data
+        currentUserName = "Имя пользователя"
+        username = "username"
+        avatarUrl = nil
+        currentUser = nil
+    }
 }

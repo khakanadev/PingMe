@@ -142,6 +142,23 @@ class EditProfileViewModel {
     }
 
     func logout() {
+        // Clear all user data
+        UserDefaults.standard.removeObject(forKey: "accessToken")
+        UserDefaults.standard.removeObject(forKey: "refreshToken")
+        UserDefaults.standard.removeObject(forKey: "accessTokenExpiration")
+        UserDefaults.standard.removeObject(forKey: "refreshTokenExpiration")
+        UserDefaults.standard.removeObject(forKey: "userData")
+        UserDefaults.standard.synchronize()
+        
+        // Clear avatar cache
+        ImageCacheService.shared.clearCache()
+        
+        // Reset user data
+        name = "Name"
+        username = "username"
+        phoneNumber = "+7 (900) 900 90 90"
+        avatarUrl = nil
+        profileImage = nil
     }
 
     // MARK: - Private

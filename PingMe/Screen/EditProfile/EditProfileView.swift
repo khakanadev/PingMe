@@ -7,6 +7,7 @@ struct EditProfileView: View {
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showError = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.routingViewModel) private var routingViewModel
 
     // MARK: - Body
     var body: some View {
@@ -245,6 +246,11 @@ struct EditProfileView: View {
                     if screen == .chats {
                         dismiss()
                     }
+                },
+                onLogout: {
+                    viewModel.logout()
+                    viewModel.isSlideBarShowing = false
+                    routingViewModel.navigateToScreen(.login)
                 }
             )
 
