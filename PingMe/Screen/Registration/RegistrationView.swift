@@ -58,14 +58,19 @@ struct RegistrationView: View {
                                     .zIndex(1)
                                     .offset(x: 16, y: 10)
 
-                                TextField("", text: $viewModel.username)
-                                    .onChange(of: viewModel.username) { _, _ in
+                                TextField("", text: Binding(
+                                    get: { viewModel.username },
+                                    set: { newValue in
+                                        viewModel.username = newValue
                                         viewModel.validateUsername()
                                     }
+                                ))
                                     .padding()
                                     .frame(width: 322, height: 60)
                                     .background(Color(hex: "#CADDAD"))
                                     .cornerRadius(8)
+                                    .autocapitalization(.none)
+                                    .autocorrectionDisabled()
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 8).stroke(
                                             viewModel.isValidUsername ? Color.black : Color.red,

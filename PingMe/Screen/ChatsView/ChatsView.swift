@@ -8,6 +8,13 @@ struct ChatsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                NavigationLink(
+                    destination: EditProfileView(),
+                    isActive: $viewModel.isEditProfileActive
+                ) {
+                    EmptyView()
+                }
+
                 VStack(spacing: 0) {
                     header
                     ScrollView {
@@ -27,10 +34,12 @@ struct ChatsView: View {
                         isShowing: $viewModel.isSlideBarShowing,
                         currentUserName: viewModel.currentUserName,
                         username: viewModel.username,
+                        avatarUrl: viewModel.avatarUrl,
                         activeScreen: .chats,
                         onNavigate: { screen in
-                            // Здесь можно добавить логику навигации
-                            // когда будут готовы другие экраны
+                            if screen == .profile {
+                                viewModel.isEditProfileActive = true
+                            }
                         }
                     )
                 }

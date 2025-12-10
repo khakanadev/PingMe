@@ -15,6 +15,7 @@ struct VerificationView: View {
     private let password: String
     @State private var isLoading = false
     @State private var isResending = false
+    @State private var isAutoVerifying = false
 
     // MARK: - Initialization
     init(
@@ -86,6 +87,24 @@ struct VerificationView: View {
                                     at: index, newValue: newValue) {
                                     focusedField = nextField
                                 }
+                                
+                                // Auto-verify when all 6 digits are entered
+                                let fullCode = viewModel.verificationCode.joined()
+                                if fullCode.count == 6 && fullCode.allSatisfy({ $0.isNumber }) && !isAutoVerifying && !isLoading {
+                                    isAutoVerifying = true
+                                    Task {
+                                        isLoading = true
+                                        if let userData = await viewModel.verifyCode() {
+                                            viewModel.saveUserData(userData)
+                                            routingViewModel.navigateToScreen(.chats)
+                                        } else if let error = viewModel.errorMessage {
+                                            errorMessage = error
+                                            showError = true
+                                        }
+                                        isAutoVerifying = false
+                                        isLoading = false
+                                    }
+                                }
                             }
                     }
                 }
@@ -94,6 +113,7 @@ struct VerificationView: View {
                 .padding(.horizontal, 21)
 
                 Button(action: {
+                    guard !isLoading && !isAutoVerifying else { return }
                     Task {
                         isLoading = true
                         if let userData = await viewModel.verifyCode() {

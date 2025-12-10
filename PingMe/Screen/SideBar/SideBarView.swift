@@ -14,6 +14,7 @@ struct SlideBarView: View {
     @Binding private var isShowing: Bool
     private let currentUserName: String
     private let username: String
+    private let avatarUrl: String?
     @AppStorage("isDarkMode") private var isDarkMode = false
     private var activeScreen: ActiveScreen?
     private var onNavigate: ((ActiveScreen) -> Void)?
@@ -23,12 +24,14 @@ struct SlideBarView: View {
         isShowing: Binding<Bool>,
         currentUserName: String,
         username: String,
+        avatarUrl: String? = nil,
         activeScreen: ActiveScreen? = nil,
         onNavigate: ((ActiveScreen) -> Void)? = nil
     ) {
         self._isShowing = isShowing
         self.currentUserName = currentUserName
         self.username = username
+        self.avatarUrl = avatarUrl
         self.activeScreen = activeScreen
         self.onNavigate = onNavigate
     }
@@ -52,9 +55,23 @@ struct SlideBarView: View {
                 HStack(spacing: 0) {
                     VStack(spacing: 24) {
                         HStack(spacing: 16) {
-                            Circle()
-                                .fill(Color(hex: "#CADDAD"))
-                                .frame(width: 60, height: 60)
+                            if let avatarUrl = avatarUrl {
+                                CachedAsyncImage(urlString: avatarUrl) { image in
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 60, height: 60)
+                                        .clipShape(Circle())
+                                } placeholder: {
+                                    Circle()
+                                        .fill(Color(hex: "#CADDAD"))
+                                        .frame(width: 60, height: 60)
+                                }
+                            } else {
+                                Circle()
+                                    .fill(Color(hex: "#CADDAD"))
+                                    .frame(width: 60, height: 60)
+                            }
 
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(currentUserName)
@@ -86,7 +103,10 @@ struct SlideBarView: View {
                                 .cornerRadius(12)
                             }
 
-                            Button(action: {}) {
+                            Button(action: {
+                                onNavigate?(.profile)
+                                isShowing = false
+                            }) {
                                 HStack {
                                     Image(systemName: "person.fill")
                                     Text("Редактировать профиль")

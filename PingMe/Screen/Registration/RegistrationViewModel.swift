@@ -41,10 +41,17 @@ class RegistrationViewModel {
 
     // MARK: - Validation Methods
     func validateUsername() {
-        let usernameRegex = "^@[A-Za-z][A-Za-z0-9]{5,}$"
+        // Check if username contains any non-ASCII letters (Russian, etc.)
+        let hasNonEnglish = username.contains { char in
+            char.isLetter && !char.isASCII
+        }
+        
+        // Only allow English letters (A-Z, a-z), numbers (0-9), underscore, and @ at the start
+        let usernameRegex = "^@[A-Za-z0-9_]{5,}$"
         let usernamePredicate = NSPredicate(format: "SELF MATCHES %@", usernameRegex)
-        isValidUsername = usernamePredicate.evaluate(with: username)
-        usernameErrorMessage = isValidUsername ? "" : "Use '@' and a minimum of 6 characters.".localized
+        
+        isValidUsername = !hasNonEnglish && usernamePredicate.evaluate(with: username)
+        usernameErrorMessage = isValidUsername ? "" : "Username должен начинаться с '@' и содержать минимум 6 символов (только английские буквы, цифры и подчеркивание)".localized
     }
     func validateEmail() {
         let emailRegex = "[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64}"

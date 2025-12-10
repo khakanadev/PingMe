@@ -12,6 +12,7 @@ struct User: Codable {
     let mailingMethod: String
     let createdAt: Date
     let updatedAt: Date
+    let avatarUrl: String?
 
     enum CodingKeys: String, CodingKey {
         case id, email, name, username
@@ -22,5 +23,6 @@ struct User: Codable {
         case mailingMethod = "mailing_method"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case avatarUrl = "avatar_url"
     }
 }
