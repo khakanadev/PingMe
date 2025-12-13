@@ -1,0 +1,398 @@
+import Foundation
+import Combine
+
+// MARK: - WebSocket Service
+@MainActor
+final class WebSocketService: ObservableObject {
+    static let shared = WebSocketService()
+    
+    // MARK: - Published Properties
+    @Published var isConnected: Bool = false
+    @Published var isAuthenticated: Bool = false
+    @Published var currentUserId: UUID?
+    @Published var errorMessage: String?
+    
+    // MARK: - Private Properties
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var urlSession: URLSession?
+    private let baseURL = "ws://127.0.0.1:8000/api/v1/ws"
+    private var heartbeatTimer: Timer?
+    private var reconnectTimer: Timer?
+    private var reconnectAttempts = 0
+    private let maxReconnectAttempts = 5
+    
+    // MARK: - Message Handlers
+    private var messageHandlers: [UUID: (Message) -> Void] = [:]
+    private var typingHandlers: [UUID: (Bool, String) -> Void] = [:]
+    private var userStatusHandlers: [UUID: (Bool) -> Void] = [:]
+    private var errorHandlers: [(String, String?) -> Void] = []
+    
+    // MARK: - Initialization
+    private init() {}
+    
+    // MARK: - Connection Management
+    
+    func connect() async {
+        guard !isConnected else { return }
+        
+        guard let url = URL(string: baseURL) else {
+            errorMessage = "Invalid WebSocket URL"
+            return
+        }
+        
+        let session = URLSession(configuration: .default)
+        let task = session.webSocketTask(with: url)
+        self.urlSession = session
+        self.webSocketTask = task
+        
+        task.resume()
+        isConnected = true
+        
+        // Start receiving messages
+        receiveMessages()
+        
+        // Authenticate if token is available
+        await authenticate()
+        
+        // Start heartbeat
+        startHeartbeat()
+    }
+    
+    func disconnect() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+        reconnectTimer?.invalidate()
+        reconnectTimer = nil
+        
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+        urlSession = nil
+        
+        isConnected = false
+        isAuthenticated = false
+        currentUserId = nil
+        reconnectAttempts = 0
+    }
+    
+    // MARK: - Authentication
+    
+    private func authenticate() async {
+        guard let token = UserDefaults.standard.string(forKey: "accessToken") else {
+            errorMessage = "No access token available"
+            return
+        }
+        
+        let authMessage = WebSocketOutgoingMessage(
+            type: .auth,
+            token: token,
+            conversationId: nil,
+            content: nil,
+            forwardedFromId: nil,
+            mediaIds: nil,
+            messageId: nil,
+            sequence: nil
+        )
+        
+        await send(message: authMessage)
+    }
+    
+    // MARK: - Message Sending
+    
+    func send(message: WebSocketOutgoingMessage) async {
+        guard let task = webSocketTask else {
+            errorMessage = "WebSocket not connected"
+            return
+        }
+        
+        do {
+            let encoder = JSONEncoder()
+            let data = try encoder.encode(message)
+            let jsonString = String(data: data, encoding: .utf8) ?? ""
+            
+            let wsMessage = URLSessionWebSocketTask.Message.string(jsonString)
+            try await task.send(wsMessage)
+        } catch {
+            errorMessage = "Failed to send message: \(error.localizedDescription)"
+            print("WebSocket send error: \(error)")
+        }
+    }
+    
+    // MARK: - Message Receiving
+    
+    private func receiveMessages() {
+        guard let task = webSocketTask else { return }
+        
+        Task {
+            do {
+                while isConnected {
+                    let message = try await task.receive()
+                    
+                    switch message {
+                    case .string(let text):
+                        await handleIncomingMessage(text: text)
+                    case .data(let data):
+                        if let text = String(data: data, encoding: .utf8) {
+                            await handleIncomingMessage(text: text)
+                        }
+                    @unknown default:
+                        break
+                    }
+                }
+            } catch {
+                print("WebSocket receive error: \(error)")
+                await handleDisconnection()
+            }
+        }
+    }
+    
+    private func handleIncomingMessage(text: String) async {
+        guard let data = text.data(using: .utf8) else { return }
+        
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .custom { decoder in
+                let container = try decoder.singleValueContainer()
+                let dateString = try container.decode(String.self)
+                
+                let dateFormatter = DateFormatter()
+                dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+                dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+                
+                let formats = [
+                    "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
+                    "yyyy-MM-dd'T'HH:mm:ss.SSSSSZ",
+                    "yyyy-MM-dd'T'HH:mm:ss.SSS",
+                    "yyyy-MM-dd'T'HH:mm:ss",
+                ]
+                
+                for format in formats {
+                    dateFormatter.dateFormat = format
+                    if let date = dateFormatter.date(from: dateString) {
+                        return date
+                    }
+                }
+                
+                throw DecodingError.dataCorruptedError(
+                    in: container,
+                    debugDescription: "Cannot decode date string \(dateString)"
+                )
+            }
+            
+            let incomingMessage = try decoder.decode(WebSocketIncomingMessage.self, from: data)
+            await processIncomingMessage(incomingMessage)
+        } catch {
+            print("Failed to decode WebSocket message: \(error)")
+            print("Message text: \(text)")
+        }
+    }
+    
+    private func processIncomingMessage(_ message: WebSocketIncomingMessage) async {
+        switch message.type {
+        case .authSuccess:
+            isAuthenticated = true
+            if let userId = message.userId {
+                currentUserId = userId
+            }
+            errorMessage = nil
+            
+        case .message:
+            if let conversationId = message.conversationId,
+               let messageId = message.id,
+               let content = message.content,
+               let senderId = message.senderId,
+               let senderName = message.senderName,
+               let createdAtString = message.createdAt,
+               let createdAt = parseDate(createdAtString) {
+                
+                let updatedAtString = message.updatedAt ?? createdAtString
+                let updatedAt = parseDate(updatedAtString) ?? createdAt
+                
+                let media = message.media ?? []
+                
+                // Create a minimal User object from WebSocket data
+                // WebSocket messages don't include full user object, only sender_name
+                let sender = User(
+                    id: senderId,
+                    email: "", // Not available in WebSocket message
+                    name: senderName,
+                    username: nil,
+                    phoneNumber: nil,
+                    isOnline: false,
+                    isVerified: false,
+                    authProvider: "",
+                    mailingMethod: "",
+                    createdAt: createdAt,
+                    updatedAt: updatedAt,
+                    avatarUrl: nil
+                )
+                
+                let wsMessage = Message(
+                    id: messageId,
+                    content: content,
+                    senderId: senderId,
+                    sender: sender,
+                    conversationId: conversationId,
+                    forwardedFromId: message.forwardedFromId,
+                    media: media,
+                    createdAt: createdAt,
+                    updatedAt: updatedAt,
+                    isEdited: message.isEdited ?? false,
+                    isDeleted: message.isDeleted ?? false
+                )
+                
+                // Notify handlers
+                print("🔵 WebSocketService: Received message for conversation \(conversationId)")
+                print("   - messageId: \(messageId)")
+                print("   - senderId: \(senderId)")
+                print("   - content: \(content)")
+                print("   - Registered handlers count: \(messageHandlers.count)")
+                print("   - Handler for this conversation: \(messageHandlers[conversationId] != nil ? "EXISTS" : "MISSING")")
+                
+                if let handler = messageHandlers[conversationId] {
+                    print("🔵 WebSocketService: Calling handler for conversation \(conversationId)")
+                    handler(wsMessage)
+                } else {
+                    print("⚠️ WebSocketService: No handler registered for conversation \(conversationId)")
+                    print("   - Available conversation IDs in handlers: \(messageHandlers.keys.map { $0.uuidString })")
+                }
+            }
+            
+        case .typingStart:
+            if let conversationId = message.conversationId {
+                // According to docs, typing_start includes user_id and user_name
+                let userName = message.userName ?? "Someone"
+                typingHandlers[conversationId]?(true, userName)
+            }
+            
+        case .typingStop:
+            if let conversationId = message.conversationId {
+                // According to docs, typing_stop includes user_id and user_name
+                let userName = message.userName ?? ""
+                typingHandlers[conversationId]?(false, userName)
+            }
+            
+        case .userOnline:
+            if let userId = message.userId {
+                userStatusHandlers[userId]?(true)
+            }
+            
+        case .userOffline:
+            if let userId = message.userId {
+                userStatusHandlers[userId]?(false)
+            }
+            
+        case .error:
+            let code = message.code ?? "UNKNOWN_ERROR"
+            let errorMsg = message.message ?? "Unknown error"
+            errorMessage = "\(code): \(errorMsg)"
+            
+            // Notify error handlers
+            for handler in errorHandlers {
+                handler(code, errorMsg)
+            }
+            
+        case .pong:
+            // Heartbeat response, do nothing
+            break
+            
+        default:
+            break
+        }
+    }
+    
+    // MARK: - Handlers Registration
+    
+    func onMessage(conversationId: UUID, handler: @escaping (Message) -> Void) {
+        messageHandlers[conversationId] = handler
+    }
+    
+    func onTyping(conversationId: UUID, handler: @escaping (Bool, String) -> Void) {
+        typingHandlers[conversationId] = handler
+    }
+    
+    func onUserStatus(userId: UUID, handler: @escaping (Bool) -> Void) {
+        userStatusHandlers[userId] = handler
+    }
+    
+    func onError(handler: @escaping (String, String?) -> Void) {
+        errorHandlers.append(handler)
+    }
+    
+    func removeMessageHandler(conversationId: UUID) {
+        messageHandlers.removeValue(forKey: conversationId)
+    }
+    
+    func removeTypingHandler(conversationId: UUID) {
+        typingHandlers.removeValue(forKey: conversationId)
+    }
+    
+    func removeUserStatusHandler(userId: UUID) {
+        userStatusHandlers.removeValue(forKey: userId)
+    }
+    
+    // MARK: - Heartbeat
+    
+    private func startHeartbeat() {
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self, self.isConnected else { return }
+                let pingMessage = WebSocketOutgoingMessage(
+                    type: .ping,
+                    token: nil,
+                    conversationId: nil,
+                    content: nil,
+                    forwardedFromId: nil,
+                    mediaIds: nil,
+                    messageId: nil,
+                    sequence: nil
+                )
+                await self.send(message: pingMessage)
+            }
+        }
+    }
+    
+    // MARK: - Reconnection
+    
+    private func handleDisconnection() async {
+        isConnected = false
+        isAuthenticated = false
+        
+        if reconnectAttempts < maxReconnectAttempts {
+            reconnectAttempts += 1
+            let delay = Double(reconnectAttempts) * 2.0 // Exponential backoff
+            
+            reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    await self?.connect()
+                }
+            }
+        } else {
+            errorMessage = "Failed to reconnect after \(maxReconnectAttempts) attempts"
+        }
+    }
+    
+    // MARK: - Helper Methods
+    
+    private func parseDate(_ dateString: String) -> Date? {
+        let dateFormatter = DateFormatter()
+        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        
+        let formats = [
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSS",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSSSZ",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+        ]
+        
+        for format in formats {
+            dateFormatter.dateFormat = format
+            if let date = dateFormatter.date(from: dateString) {
+                return date
+            }
+        }
+        
+        return nil
+    }
+}
+
