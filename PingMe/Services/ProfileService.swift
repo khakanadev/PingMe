@@ -43,6 +43,22 @@ final class ProfileService {
     }
 
     // MARK: - Public
+    func searchUsers(query: String, skip: Int = 0, limit: Int = 50) async throws -> APIResponse<[UserBrief]> {
+        guard let token = UserDefaults.standard.string(forKey: "accessToken") else {
+            throw AuthError.serverError("Missing access token")
+        }
+        
+        guard let url = URL(string: "\(baseURL)/api/v1/users/search?query=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)&skip=\(skip)&limit=\(limit)") else {
+            throw AuthError.invalidURL
+        }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        return try await perform(request: request)
+    }
+    
     func fetchProfile() async throws -> APIResponse<User> {
         guard let token = UserDefaults.standard.string(forKey: "accessToken") else {
             throw AuthError.serverError("Missing access token")
@@ -52,6 +68,21 @@ final class ProfileService {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         return try await perform(request: request)
+    }
+    
+    /// Get user by ID - returns UserBrief (simplified user info)
+    func getUserById(_ userId: UUID) async throws -> APIResponse<UserBrief> {
+        guard let token = UserDefaults.standard.string(forKey: "accessToken") else {
+            throw AuthError.serverError("Missing access token")
+        }
+        
+        var request = try authorizedRequest(endpoint: "/api/v1/users/\(userId.uuidString)", method: "GET")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        print("🔵 ProfileService: Getting user by ID: \(userId.uuidString)")
+        let response: APIResponse<UserBrief> = try await perform(request: request)
+        print("🔵 ProfileService: getUserById response - success: \(response.success), data: \(response.data != nil ? "present" : "nil")")
+        return response
     }
 
     func updateProfile(
@@ -187,19 +218,36 @@ final class ProfileService {
             throw AuthError.serverError("Сессия истекла. Войдите снова.")
         }
 
-        // Try decoding standard APIResponse first
-        if let apiResponse = try? decoder.decode(APIResponse<R>.self, from: data) {
-            return apiResponse
-        }
+        // Check HTTP status code first
+        if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
+            // Try decoding standard APIResponse first
+            if let apiResponse = try? decoder.decode(APIResponse<R>.self, from: data) {
+                print("🔵 ProfileService: Successfully decoded APIResponse")
+                return apiResponse
+            }
 
-        // Try decoding raw model and wrap it
-        if let model = try? decoder.decode(R.self, from: data) {
-            return APIResponse(success: true, message: nil, data: model, error: nil)
-        }
+            // Try decoding raw model and wrap it
+            if let model = try? decoder.decode(R.self, from: data) {
+                print("🔵 ProfileService: Successfully decoded raw model")
+                return APIResponse(success: true, message: nil, data: model, error: nil)
+            }
 
-        // Try detail wrapper from backend
-        if let wrapped = try? decoder.decode(DetailWrapper<R>.self, from: data) {
-            return wrapped.detail
+            // Try detail wrapper from backend
+            if let wrapped = try? decoder.decode(DetailWrapper<R>.self, from: data) {
+                print("🔵 ProfileService: Successfully decoded DetailWrapper")
+                return wrapped.detail
+            }
+            
+            // If all decoding attempts failed, log the raw response
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🔵 ProfileService: Failed to decode response. Raw data: \(responseString)")
+            }
+        } else {
+            // Non-2xx status code - try to decode error message
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("🔵 ProfileService: HTTP \(httpResponse.statusCode) error: \(responseString)")
+                throw AuthError.serverError("HTTP \(httpResponse.statusCode): \(responseString)")
+            }
         }
 
         // Try to surface server error text if present
