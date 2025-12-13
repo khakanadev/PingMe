@@ -15,14 +15,37 @@ struct ChatsView: View {
                 ) {
                     EmptyView()
                 }
+                
+                if let user = viewModel.selectedUser {
+                    NavigationLink(
+                        destination: UserProfileView(user: user)
+                            .environment(viewModel),
+                        isActive: $viewModel.isUserProfileActive
+                    ) {
+                        EmptyView()
+                    }
+                }
+                
+                // Navigation handled via navigationDestination
 
                 VStack(spacing: 0) {
                     header
                     ScrollView {
                         VStack(spacing: 0) {
-                            storiesSection
-
-                            chatsList
+                            if viewModel.isLoading {
+                                ProgressView()
+                                    .padding()
+                            } else if viewModel.chats.isEmpty {
+                                VStack {
+                                    Spacer()
+                                    Text("Нет чатов")
+                                        .foregroundColor(.gray)
+                                        .padding()
+                                    Spacer()
+                                }
+                            } else {
+                                chatsList
+                            }
                         }
                     }
                 }
@@ -48,6 +71,37 @@ struct ChatsView: View {
                             routingViewModel.navigateToScreen(.login)
                         }
                     )
+                }
+            }
+            .sheet(isPresented: $viewModel.isSearchUsersActive) {
+                NavigationStack {
+                    SearchUsersView { user in
+                        viewModel.selectedUser = user
+                        viewModel.isSearchUsersActive = false
+                        viewModel.isUserProfileActive = true
+                    }
+                }
+            }
+            .navigationDestination(item: $viewModel.selectedChatInfo) { chatInfo in
+                // Find ChatData for this conversation to get username and avatar
+                let chatData = viewModel.chatDataList.first { $0.recipientId == chatInfo.userId }
+                ChatView(
+                    recipientId: chatInfo.userId,
+                    recipientName: chatInfo.userName,
+                    recipientUsername: chatData?.recipientUsername,
+                    recipientAvatarUrl: chatData?.recipientAvatarUrl,
+                    isRecipientOnline: chatInfo.isOnline,
+                    conversationId: chatInfo.conversationId
+                )
+                .onDisappear {
+                    // Clear selectedChatInfo when leaving chat to allow navigation again
+                    viewModel.selectedChatInfo = nil
+                }
+            }
+            .onAppear {
+                // Reload conversations when view appears (e.g., when returning from chat)
+                Task {
+                    await viewModel.loadConversations()
                 }
             }
         }
@@ -82,32 +136,21 @@ struct ChatsView: View {
         .background(Color(hex: "#CADDAD"))
     }
 
-    // MARK: - Stories Section
-    private var storiesSection: some View {
-        VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    if let currentUser = viewModel.currentUser {
-                        StoryView(story: currentUser, isCurrentUser: true)
-                    }
-
-                    ForEach(viewModel.stories) { story in
-                        StoryView(story: story)
-                    }
-                }
-                .padding()
-            }
-        }
-    }
-
     // MARK: - Chats List
     private var chatsList: some View {
         LazyVStack(spacing: 0) {
-            ForEach(viewModel.chats) { chat in
+            ForEach(viewModel.chatDataList) { chatData in
                 VStack(spacing: 0) {
-                    ChatRowView(chat: chat)
-                        .padding(.horizontal)
-                        .padding(.vertical, 8)
+                    ChatRowView(
+                        chat: chatData.chat,
+                        recipientId: chatData.recipientId,
+                        recipientName: chatData.recipientName,
+                        recipientUsername: chatData.recipientUsername,
+                        recipientAvatarUrl: chatData.recipientAvatarUrl,
+                        isRecipientOnline: chatData.isRecipientOnline
+                    )
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
 
                     Divider()
                         .background(Color(uiColor: .systemGray5))
@@ -118,8 +161,10 @@ struct ChatsView: View {
 
     // MARK: - New Chat Button
     private var newChatButton: some View {
-        Button(action: {}) {
-            Image(systemName: "plus")
+        Button(action: {
+            viewModel.isSearchUsersActive = true
+        }) {
+            Image(systemName: "magnifyingglass")
                 .font(.title2)
                 .foregroundColor(.black)
                 .frame(width: 60, height: 60)
@@ -166,31 +211,98 @@ struct StoryView: View {
 // MARK: - Chat Row Component
 struct ChatRowView: View {
     let chat: Chat
+    let recipientId: UUID?
+    let recipientName: String
+    let recipientUsername: String?
+    let recipientAvatarUrl: String?
+    let isRecipientOnline: Bool
+
+    private var avatarUrlToUse: String? {
+        recipientAvatarUrl ?? chat.avatarUrl
+    }
 
     var body: some View {
-        NavigationLink(destination: ChatView(recipientName: chat.username)) {
+        NavigationLink(destination: ChatView(
+            recipientId: recipientId ?? UUID(),
+            recipientName: recipientName,
+            recipientUsername: recipientUsername,
+            recipientAvatarUrl: recipientAvatarUrl,
+            isRecipientOnline: isRecipientOnline,
+            conversationId: chat.id
+        )) {
             HStack(spacing: 12) {
-                Circle()
-                    .fill(Color(uiColor: .systemGray5))
-                    .frame(width: 50, height: 50)
+                // Avatar
+                ZStack(alignment: .bottomTrailing) {
+                    if let avatarUrl = avatarUrlToUse, !avatarUrl.isEmpty {
+                        CachedAsyncImage(urlString: avatarUrl) { image in
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 60, height: 60)
+                                .clipShape(Circle())
+                        } placeholder: {
+                            Circle()
+                                .fill(Color(uiColor: .systemGray5))
+                                .frame(width: 60, height: 60)
+                                .overlay(
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                )
+                        }
+                    } else {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(hex: "#CADDAD"), Color(hex: "#CADDAD").opacity(0.7)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 60, height: 60)
+                            .overlay(
+                                Text(recipientName.prefix(1).uppercased())
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .foregroundColor(.white)
+                            )
+                    }
+                    
+                    // Online indicator
+                    if isRecipientOnline && !chat.isGroup {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 14, height: 14)
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white, lineWidth: 2)
+                            )
+                    }
+                }
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(chat.username)
-                        .font(.system(size: 16, weight: .semibold))
-
+                // Name and last message
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(recipientName)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.black)
+                            .lineLimit(1)
+                        
+                        Spacer()
+                        
+                        Text(chat.lastMessageTime.formattedTime())
+                            .font(.system(size: 13))
+                            .foregroundColor(.gray)
+                    }
+                    
                     Text(chat.lastMessage)
                         .font(.system(size: 14))
                         .foregroundColor(.gray)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
-
-                Spacer()
-
-                Text(chat.lastMessageTime.formattedTime())
-                    .font(.system(size: 14))
-                    .foregroundColor(.gray)
             }
-            .foregroundColor(.black)
+            .padding(.vertical, 4)
         }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
