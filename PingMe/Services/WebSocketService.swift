@@ -15,7 +15,8 @@ final class WebSocketService: ObservableObject {
     // MARK: - Private Properties
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
-    private let baseURL = "ws://127.0.0.1:8000/api/v1/ws"
+    // Production WebSocket endpoint
+    private let baseURL = "wss://pingme-messenger.ru/api/v1/ws"
     private var heartbeatTimer: Timer?
     private var reconnectTimer: Timer?
     private var reconnectAttempts = 0

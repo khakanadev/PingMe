@@ -11,7 +11,8 @@ enum AuthError: Error {
 
 // MARK: - Auth Service
 class AuthService {
-    private let baseURL = "http://localhost:8000"
+    // Production API base URL
+    private let baseURL = "https://pingme-messenger.ru"
 
     // MARK: - Public Methods
     func register(email: String, password: String, name: String) async throws -> APIResponse<

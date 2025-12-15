@@ -24,7 +24,8 @@ struct MediaResponse: Codable {
 
 // MARK: - Profile Service
 final class ProfileService {
-    private let baseURL = "http://localhost:8000"
+    // Production API base URL
+    private let baseURL = "https://pingme-messenger.ru"
     private struct DetailWrapper<R: Codable>: Codable {
         let detail: APIResponse<R>
     }
