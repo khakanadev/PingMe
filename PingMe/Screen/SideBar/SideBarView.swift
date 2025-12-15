@@ -19,6 +19,7 @@ struct SlideBarView: View {
     private var activeScreen: ActiveScreen?
     private var onNavigate: ((ActiveScreen) -> Void)?
     private var onLogout: (() -> Void)?
+    @State private var showWorkInProgressAlert = false
 
     // MARK: - Initialization
     init(
@@ -137,6 +138,9 @@ struct SlideBarView: View {
                                     isActive(.suddenMeet) ? Color(hex: "#CADDAD") : Color.black
                                 )
                                 .cornerRadius(12)
+                                .onTapGesture {
+                                    showWorkInProgressAlert = true
+                                }
                             }
 
                             Button(action: {}) {
@@ -150,6 +154,9 @@ struct SlideBarView: View {
                                 .padding()
                                 .background(isActive(.pingMe) ? Color(hex: "#CADDAD") : Color.black)
                                 .cornerRadius(12)
+                                .onTapGesture {
+                                    showWorkInProgressAlert = true
+                                }
                             }
 
                             Button(action: {}) {
@@ -165,6 +172,9 @@ struct SlideBarView: View {
                                     isActive(.settings) ? Color(hex: "#CADDAD") : Color.black
                                 )
                                 .cornerRadius(12)
+                                .onTapGesture {
+                                    showWorkInProgressAlert = true
+                                }
                             }
                         }
 
@@ -186,6 +196,8 @@ struct SlideBarView: View {
                             .foregroundColor(.white)
 
                             Button(action: {
+                                // Close WebSocket connection on logout
+                                WebSocketService.shared.disconnect()
                                 onLogout?()
                             }) {
                                 HStack {
@@ -215,6 +227,11 @@ struct SlideBarView: View {
                 .offset(x: isShowing ? 0 : -min(geometry.size.width * 0.8, 300) - 50)
             }
             .ignoresSafeArea()
+            .alert("В разработке", isPresented: $showWorkInProgressAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("Этот раздел пока в разработке.")
+            }
         }
     }
 }

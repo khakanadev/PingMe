@@ -301,6 +301,8 @@ struct ChatRowView: View {
                 }
             }
             .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle()) // Make entire row tappable
         }
         .buttonStyle(PlainButtonStyle())
     }

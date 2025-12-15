@@ -68,10 +68,8 @@ final class ChatViewModel: ObservableObject {
             return
         }
         
-        // Connect to WebSocket if not connected
-        if !webSocketService.isConnected {
-            await webSocketService.connect()
-        }
+        // Always call connect: WebSocketService will either connect or re-authenticate with current token
+        await webSocketService.connect()
         
         // Wait for authentication
         var attempts = 0

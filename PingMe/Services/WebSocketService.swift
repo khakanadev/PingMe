@@ -20,6 +20,7 @@ final class WebSocketService: ObservableObject {
     private var reconnectTimer: Timer?
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 5
+    private var isManualDisconnect = false
     
     // MARK: - Message Handlers
     private var messageHandlers: [UUID: (Message) -> Void] = [:]
@@ -33,7 +34,14 @@ final class WebSocketService: ObservableObject {
     // MARK: - Connection Management
     
     func connect() async {
-        guard !isConnected else { return }
+        // Reset manual disconnect flag on any explicit connect attempt
+        isManualDisconnect = false
+        
+        // If already connected (e.g. after account switch), always re-authenticate with current token
+        if isConnected {
+            await authenticate()
+            return
+        }
         
         guard let url = URL(string: baseURL) else {
             errorMessage = "Invalid WebSocket URL"
@@ -59,6 +67,7 @@ final class WebSocketService: ObservableObject {
     }
     
     func disconnect() {
+        isManualDisconnect = true
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
         reconnectTimer?.invalidate()
@@ -72,6 +81,12 @@ final class WebSocketService: ObservableObject {
         isAuthenticated = false
         currentUserId = nil
         reconnectAttempts = 0
+        
+        // Clear handlers to avoid leaking callbacks between accounts
+        messageHandlers.removeAll()
+        typingHandlers.removeAll()
+        userStatusHandlers.removeAll()
+        errorHandlers.removeAll()
     }
     
     // MARK: - Authentication
@@ -356,6 +371,11 @@ final class WebSocketService: ObservableObject {
     private func handleDisconnection() async {
         isConnected = false
         isAuthenticated = false
+        
+        // If disconnect was initiated manually (e.g. logout), do NOT auto-reconnect
+        if isManualDisconnect {
+            return
+        }
         
         if reconnectAttempts < maxReconnectAttempts {
             reconnectAttempts += 1
