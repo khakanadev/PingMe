@@ -18,8 +18,7 @@ struct ChatsView: View {
                 
                 if let user = viewModel.selectedUser {
                     NavigationLink(
-                        destination: UserProfileView(user: user)
-                            .environment(viewModel),
+                        destination: UserProfileView(user: user, chatsViewModel: viewModel),
                         isActive: $viewModel.isUserProfileActive
                     ) {
                         EmptyView()

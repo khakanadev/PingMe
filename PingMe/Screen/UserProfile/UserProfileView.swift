@@ -3,7 +3,9 @@ import SwiftUI
 struct UserProfileView: View {
     let user: UserBrief
     @Environment(\.dismiss) private var dismiss
-    @Environment(ChatsViewModel.self) private var chatsViewModel
+    var chatsViewModel: ChatsViewModel? = nil
+    var onOpenChat: ((UUID, String, Bool) -> Void)? = nil
+    var showWriteButton: Bool = true
     
     var body: some View {
         ZStack {
@@ -152,41 +154,71 @@ struct UserProfileView: View {
                 Spacer()
                 
                 // Action Buttons
-                HStack(spacing: 12) {
-                    Button(action: {
-                        chatsViewModel.openChat(
-                            with: user.id,
-                            userName: user.name,
-                            isOnline: user.isOnline
-                        )
-                    }) {
-                        Text("Написать")
-                            .foregroundColor(.black)
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 50)
-                            .background(Color(hex: "#CADDAD"))
-                            .cornerRadius(12)
+                if showWriteButton {
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            if let onOpenChat = onOpenChat {
+                                onOpenChat(user.id, user.name, user.isOnline)
+                                dismiss()
+                            } else if let chatsViewModel = chatsViewModel {
+                                chatsViewModel.openChat(
+                                    with: user.id,
+                                    userName: user.name,
+                                    isOnline: user.isOnline
+                                )
+                                dismiss()
+                            }
+                        }) {
+                            Text("Написать")
+                                .foregroundColor(.black)
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 50)
+                                .background(Color(hex: "#CADDAD"))
+                                .cornerRadius(12)
+                        }
+                        
+                        Button(action: {
+                            shareContact()
+                        }) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.title3)
+                                .foregroundColor(.white)
+                                .frame(width: 60)
+                                .frame(height: 50)
+                                .background(Color(hex: "#444444"))
+                                .cornerRadius(12)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                                )
+                        }
                     }
-                    
+                    .padding(.horizontal)
+                    .padding(.bottom, 30)
+                } else {
                     Button(action: {
                         shareContact()
                     }) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.title3)
-                            .foregroundColor(.white)
-                            .frame(width: 60)
-                            .frame(height: 50)
-                            .background(Color(hex: "#444444"))
-                            .cornerRadius(12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                            )
+                        HStack {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.title3)
+                            Text("Поделиться контактом")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color(hex: "#444444"))
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                        )
                     }
+                    .padding(.horizontal)
+                    .padding(.bottom, 30)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 30)
             }
         }
         .navigationBarBackButtonHidden(true)

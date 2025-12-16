@@ -14,4 +14,13 @@ struct UserBrief: Codable, Identifiable {
         case lastSeen = "last_seen"
         case avatarUrl = "avatar_url"
     }
+    
+    init(id: UUID, name: String, username: String?, isOnline: Bool, lastSeen: Date?, avatarUrl: String?) {
+        self.id = id
+        self.name = name
+        self.username = username
+        self.isOnline = isOnline
+        self.lastSeen = lastSeen
+        self.avatarUrl = avatarUrl
+    }
 }

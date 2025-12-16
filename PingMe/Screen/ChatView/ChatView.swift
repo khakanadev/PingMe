@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 
 // MARK: - Main View
+// swiftlint:disable type_body_length
 struct ChatView: View {
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.dismiss) private var dismiss
@@ -9,6 +10,9 @@ struct ChatView: View {
     @State private var typingTimer: Timer?
     @State private var selectedItems: [PhotosPickerItem] = []
     @State private var selectedMedia: MessageMedia? = nil
+    @State private var showUserProfile: Bool = false
+    @State private var userProfileData: UserBrief? = nil
+    @State private var isLoadingProfile: Bool = false
 
     // MARK: - Initialization
     init(recipientId: UUID, recipientName: String, recipientUsername: String? = nil, recipientAvatarUrl: String? = nil, isRecipientOnline: Bool = true, conversationId: UUID? = nil) {
@@ -71,6 +75,28 @@ struct ChatView: View {
         .fullScreenCover(item: $selectedMedia) { media in
             MediaViewerView(mediaId: media.id)
         }
+        .sheet(isPresented: $showUserProfile) {
+            if let user = userProfileData {
+                NavigationStack {
+                    UserProfileView(
+                        user: user,
+                        chatsViewModel: nil,
+                        onOpenChat: { userId, userName, isOnline in
+                            // Handle opening chat from profile - already in chat, so just dismiss
+                            dismiss()
+                        },
+                        showWriteButton: false
+                    )
+                }
+            } else {
+                // Show loading state
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    ProgressView()
+                        .tint(.white)
+                }
+            }
+        }
     }
 
     // MARK: - UI Components
@@ -81,54 +107,65 @@ struct ChatView: View {
                     .font(.title2)
             }
 
-            // Avatar
-            if let avatarUrl = viewModel.recipientAvatarUrl, !avatarUrl.isEmpty {
-                CachedAsyncImage(urlString: avatarUrl) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 40, height: 40)
-                        .clipShape(Circle())
-                } placeholder: {
-            Circle()
-                .fill(Color(uiColor: .systemGray5))
-                .frame(width: 40, height: 40)
-                        .overlay(
-                            ProgressView()
-                                .scaleEffect(0.6)
-                        )
-                }
-            } else {
+            // Avatar - clickable
+            Button(action: {
+                loadUserProfile()
+            }) {
+                if let avatarUrl = viewModel.recipientAvatarUrl, !avatarUrl.isEmpty {
+                    CachedAsyncImage(urlString: avatarUrl) { image in
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 40, height: 40)
+                            .clipShape(Circle())
+                    } placeholder: {
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(hex: "#CADDAD"), Color(hex: "#CADDAD").opacity(0.7)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(Color(uiColor: .systemGray5))
                     .frame(width: 40, height: 40)
-                    .overlay(
-                        Text(viewModel.recipientName.prefix(1).uppercased())
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.white)
-                    )
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(viewModel.recipientName)
-                    .font(.system(size: 16, weight: .semibold))
-
-                HStack(spacing: 4) {
+                            .overlay(
+                                ProgressView()
+                                    .scaleEffect(0.6)
+                            )
+                    }
+                } else {
                     Circle()
-                        .fill(viewModel.isRecipientOnline ? .green : .gray)
-                        .frame(width: 8, height: 8)
-
-                    Text(viewModel.isRecipientOnline ? "online" : "offline")
-                        .font(.caption)
-                        .foregroundColor(.gray)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(hex: "#CADDAD"), Color(hex: "#CADDAD").opacity(0.7)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Text(viewModel.recipientName.prefix(1).uppercased())
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.white)
+                        )
                 }
             }
+            .buttonStyle(PlainButtonStyle())
+
+            // Name and status - clickable
+            Button(action: {
+                loadUserProfile()
+            }) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(viewModel.recipientName)
+                        .font(.system(size: 16, weight: .semibold))
+
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(viewModel.isRecipientOnline ? .green : .gray)
+                            .frame(width: 8, height: 8)
+
+                        Text(viewModel.isRecipientOnline ? "online" : "offline")
+                            .font(.caption)
+                            .foregroundColor(.gray)
+                    }
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
 
             Spacer()
 
@@ -320,6 +357,51 @@ struct ChatView: View {
         }
         .padding()
         .foregroundColor(.black)
+        }
+    }
+    
+    // MARK: - User Profile Loading
+    private func loadUserProfile() {
+        guard !isLoadingProfile else { return }
+        
+        isLoadingProfile = true
+        showUserProfile = true // Show sheet immediately with loading state
+        
+        Task {
+            do {
+                let profileService = ProfileService()
+                let response = try await profileService.getUserById(viewModel.recipientId)
+                
+                await MainActor.run {
+                    if let user = response.data {
+                        userProfileData = user
+                    } else {
+                        // If no data, create a basic UserBrief from available info
+                        userProfileData = UserBrief(
+                            id: viewModel.recipientId,
+                            name: viewModel.recipientName,
+                            username: viewModel.recipientUsername,
+                            isOnline: viewModel.isRecipientOnline,
+                            lastSeen: nil,
+                            avatarUrl: viewModel.recipientAvatarUrl
+                        )
+                    }
+                    isLoadingProfile = false
+                }
+            } catch {
+                // On error, create a basic UserBrief from available info
+                await MainActor.run {
+                    userProfileData = UserBrief(
+                        id: viewModel.recipientId,
+                        name: viewModel.recipientName,
+                        username: viewModel.recipientUsername,
+                        isOnline: viewModel.isRecipientOnline,
+                        lastSeen: nil,
+                        avatarUrl: viewModel.recipientAvatarUrl
+                    )
+                    isLoadingProfile = false
+                }
+            }
         }
     }
 }
