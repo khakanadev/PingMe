@@ -1,5 +1,7 @@
+// swiftlint:disable type_body_length cyclomatic_complexity line_length
 import Foundation
 import Combine
+import UIKit
 
 // MARK: - View Model
 @MainActor
@@ -17,16 +19,18 @@ final class ChatViewModel: ObservableObject {
     @Published var conversationId: UUID?
     @Published var isTyping: Bool = false
     @Published var typingUserName: String = ""
+    @Published var attachments: [AttachmentItem] = []
+    @Published var isSending: Bool = false
     
     // MARK: - Private Properties
     private let conversationService = ConversationService()
     private let webSocketService = WebSocketService.shared
+    private let mediaService = MediaService()
     private var currentUserId: UUID?
     private var isInitializing = false // Prevent multiple initializations
 
     // MARK: - Initialization
     init(recipientId: UUID, recipientName: String, recipientUsername: String? = nil, recipientAvatarUrl: String? = nil, isRecipientOnline: Bool = true, conversationId: UUID? = nil) {
-        print("🔵 ChatViewModel: init called for recipientId: \(recipientId), conversationId: \(conversationId?.uuidString ?? "nil")")
         self.recipientId = recipientId
         self.recipientName = recipientName
         self.recipientUsername = recipientUsername
@@ -44,16 +48,13 @@ final class ChatViewModel: ObservableObject {
     private func initialize() async {
         // Prevent multiple initializations
         guard !isInitializing else {
-            print("🔵 ChatViewModel: initialize() skipped - already initializing")
             return
         }
         isInitializing = true
         defer { 
             isInitializing = false
-            print("🔵 ChatViewModel: initialize() completed")
         }
         
-        print("🔵 ChatViewModel: initialize() started for recipientId: \(recipientId)")
         isLoading = true
         
         // Load current user ID
@@ -98,30 +99,25 @@ final class ChatViewModel: ObservableObject {
         
         // Ensure isLoading is set to false after everything is done
         isLoading = false
-        print("🔵 ChatViewModel: isLoading set to false (final)")
     }
     
     // MARK: - Conversation Management
     
     private func findOrCreateConversation() async {
-        print("🔵 ChatViewModel: findOrCreateConversation called for recipientId: \(recipientId)")
         
         // Prevent multiple simultaneous calls
         guard conversationId == nil else {
-            print("🔵 ChatViewModel: findOrCreateConversation skipped - conversationId already exists: \(conversationId!)")
             return
         }
         
         do {
             // First, try to find existing conversation
-            print("🔵 ChatViewModel: Searching for existing conversation...")
             let conversationsResponse = try await conversationService.getConversations()
             
             if let conversations = conversationsResponse.data,
                let existingConversation = conversations.first(where: { conversation in
                    !conversation.isGroup && conversation.participants?.contains { $0.userId == recipientId } == true
                }) {
-                print("🔵 ChatViewModel: Found existing conversation: \(existingConversation.id)")
                 await MainActor.run {
                     conversationId = existingConversation.id
                 }
@@ -134,11 +130,9 @@ final class ChatViewModel: ObservableObject {
             }
             
             // If not found, create new conversation
-            print("🔵 ChatViewModel: No existing conversation found, creating new one...")
             let response = try await conversationService.createConversation(participantIds: [recipientId])
             
             if response.success, let conversation = response.data {
-                print("🔵 ChatViewModel: Created new conversation: \(conversation.id)")
                 await MainActor.run {
                     conversationId = conversation.id
                 }
@@ -150,7 +144,6 @@ final class ChatViewModel: ObservableObject {
                     setupWebSocketHandlers()
                 }
             } else {
-                print("🔵 ChatViewModel: Failed to create conversation: \(response.error ?? "Unknown error")")
                 // Allow user to send message anyway - conversation will be created via WebSocket
                 await MainActor.run {
                     errorMessage = nil
@@ -158,7 +151,6 @@ final class ChatViewModel: ObservableObject {
                 }
             }
         } catch {
-            print("🔵 ChatViewModel: Error in findOrCreateConversation: \(error)")
             // On error, still allow sending message
             await MainActor.run {
                 errorMessage = nil
@@ -169,12 +161,9 @@ final class ChatViewModel: ObservableObject {
     
     private func loadMessages() async {
         guard let conversationId = conversationId else {
-            print("🔵 ChatViewModel: loadMessages - no conversationId")
             return
         }
         
-        print("🔵 ChatViewModel: Loading messages for conversation: \(conversationId)")
-        print("🔵 ChatViewModel: currentUserId: \(currentUserId?.uuidString ?? "nil")")
         
         do {
             // Load all messages by using pagination
@@ -185,16 +174,13 @@ final class ChatViewModel: ObservableObject {
             var hasMore = true
             
             while hasMore {
-                print("🔵 ChatViewModel: Loading messages - skip: \(skip), limit: \(limit)")
                 let response = try await conversationService.getMessages(conversationId: conversationId, skip: skip, limit: limit)
                 
                 guard response.success, let loadedMessages = response.data else {
                     let errorMsg = response.error ?? "Failed to load messages"
-                    print("🔵 ChatViewModel: Failed to load messages: \(errorMsg)")
                     break
                 }
                 
-                print("🔵 ChatViewModel: Loaded \(loadedMessages.count) messages from API (skip: \(skip))")
                 
                 if loadedMessages.isEmpty {
                     hasMore = false
@@ -209,41 +195,35 @@ final class ChatViewModel: ObservableObject {
                 }
             }
             
-            print("🔵 ChatViewModel: Total messages loaded: \(allMessages.count)")
             
             // Log all messages to see what we received
             for (index, message) in allMessages.enumerated() {
                 let isFromCurrentUser = message.senderId == currentUserId
-                print("🔵 ChatViewModel: Message \(index):")
-                print("   - id: \(message.id)")
-                print("   - senderId: \(message.senderId)")
-                print("   - senderName: \(message.senderName)")
-                print("   - sender object: \(message.sender?.name ?? "nil")")
-                print("   - content: \(message.content.prefix(50))")
-                print("   - createdAt: \(message.createdAt)")
-                print("   - isFromCurrentUser: \(isFromCurrentUser)")
             }
             
             if let currentUserId = currentUserId {
                 let displayMessages = allMessages.map { MessageDisplay(from: $0, currentUserId: currentUserId, recipientId: recipientId) }
                 let sortedMessages = displayMessages.sorted { $0.timestamp < $1.timestamp }
+                
+                // Log media information
+                for (index, msg) in sortedMessages.enumerated() {
+                    if !msg.media.isEmpty {
+                        for (mediaIndex, media) in msg.media.enumerated() {
+                        }
+                    }
+                }
+                
                 await MainActor.run {
                     messages = sortedMessages
-                    print("🔵 ChatViewModel: Display messages count: \(messages.count)")
-                    print("🔵 ChatViewModel: Messages from current user: \(messages.filter { $0.isFromCurrentUser }.count)")
-                    print("🔵 ChatViewModel: Messages from other users: \(messages.filter { !$0.isFromCurrentUser }.count)")
-                    print("🔵 ChatViewModel: recipientId: \(recipientId), currentUserId: \(currentUserId)")
                     isLoading = false
                 }
             } else {
-                print("🔵 ChatViewModel: No currentUserId available")
                 await MainActor.run {
                     isLoading = false
                 }
             }
         } catch {
             let errorMsg = "Failed to load messages: \(error.localizedDescription)"
-            print("🔵 ChatViewModel: Error loading messages: \(errorMsg)")
             await MainActor.run {
                 errorMessage = errorMsg
                 isLoading = false
@@ -273,38 +253,25 @@ final class ChatViewModel: ObservableObject {
     @MainActor
     private func setupWebSocketHandlers() {
         guard let conversationId = conversationId else {
-            print("⚠️ ChatViewModel: setupWebSocketHandlers - no conversationId")
             return
         }
         
-        print("🔵 ChatViewModel: Setting up WebSocket handlers for conversation \(conversationId)")
         
         // Message handler
         webSocketService.onMessage(conversationId: conversationId) { [weak self] message in
             Task { @MainActor [weak self] in
                 guard let self = self, let currentUserId = self.currentUserId else {
-                    print("⚠️ ChatViewModel: Handler called but self or currentUserId is nil")
                     return
                 }
                 
-                print("🔵 ChatViewModel: Received message via WebSocket handler")
-                print("   - messageId: \(message.id)")
-                print("   - senderId: \(message.senderId)")
-                print("   - content: \(message.content)")
-                print("   - currentUserId: \(currentUserId)")
-                print("   - recipientId: \(self.recipientId)")
-                print("   - isFromCurrentUser: \(message.senderId == currentUserId)")
                 
                 let displayMessage = MessageDisplay(from: message, currentUserId: currentUserId, recipientId: self.recipientId)
                 
                 // Check if message already exists
                 if !self.messages.contains(where: { $0.id == displayMessage.id }) {
-                    print("🔵 ChatViewModel: Adding new message to list (current count: \(self.messages.count))")
                     self.messages.append(displayMessage)
                     self.messages.sort { $0.timestamp < $1.timestamp }
-                    print("🔵 ChatViewModel: Message added, new count: \(self.messages.count)")
                 } else {
-                    print("⚠️ ChatViewModel: Message already exists in list, skipping")
                 }
             }
         }
@@ -330,14 +297,29 @@ final class ChatViewModel: ObservableObject {
     // MARK: - Message Management
     
     func sendMessage() {
-        guard !newMessageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        // Prevent double sending
+        guard !isSending else {
             return
         }
         
-        let content = newMessageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = newMessageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasText = !trimmed.isEmpty
+        let hasAttachments = !attachments.isEmpty
+        
+        guard hasText || hasAttachments else {
+            return
+        }
+        
+        isSending = true
         newMessageText = ""
         
         Task {
+            defer {
+                Task { @MainActor in
+                    self.isSending = false
+                }
+            }
+            
             // If no conversationId, create conversation first
             if conversationId == nil {
                 await createConversationIfNeeded()
@@ -348,7 +330,7 @@ final class ChatViewModel: ObservableObject {
                 return
             }
             
-            await sendMessageAsync(content: content, conversationId: conversationId)
+            await sendMessageAsync(content: trimmed, conversationId: conversationId)
         }
     }
     
@@ -362,30 +344,171 @@ final class ChatViewModel: ObservableObject {
                 NotificationCenter.default.post(name: .conversationCreated, object: nil)
                 await subscribeToConversation()
                 setupWebSocketHandlers()
-                print("🔵 ChatViewModel: Created conversation and set up handlers in createConversationIfNeeded")
             }
         } catch {
-            print("Failed to create conversation: \(error)")
         }
     }
     
     @MainActor
     private func sendMessageAsync(content: String, conversationId: UUID) async {
+        
+        // Step 1: Send message first (without media) to get message_id
         let message = WebSocketOutgoingMessage(
             type: .message,
             token: nil,
             conversationId: conversationId,
-            content: content,
+            content: content.isEmpty ? " " : content, // Send at least space if no text
             forwardedFromId: nil,
-            mediaIds: nil,
+            mediaIds: nil, // Will upload media after getting message_id
             messageId: nil,
             sequence: nil
         )
         
-        await webSocketService.send(message: message)
+        // Send message and wait for message_id if we have attachments
+        if !attachments.isEmpty {
+            let attachmentsCount = attachments.count
+            do {
+                let messageId = try await webSocketService.sendAndWaitForMessageId(
+                    message: message,
+                    conversationId: conversationId,
+                    timeout: 5.0
+                )
+                
+                if let msgId = messageId {
+                    // Step 2: Upload media with the received message_id
+                    do {
+                        let mediaIds = try await uploadAttachments(conversationId: conversationId, messageId: msgId)
+                        
+                        // Step 3: Reload the message from API to get updated media
+                        await reloadMessage(messageId: msgId)
+                        
+                        // Clear attachments after successful upload
+                        await MainActor.run {
+                            self.attachments.removeAll()
+                        }
+                    } catch {
+                        // Clear attachments even on error to prevent infinite loading
+                        await MainActor.run {
+                            self.attachments.removeAll()
+                            self.errorMessage = "Сообщение отправлено, но не удалось загрузить вложения: \(self.describe(error))"
+                        }
+                    }
+                } else {
+                    // Clear attachments on timeout to prevent infinite loading
+                    await MainActor.run {
+                        self.attachments.removeAll()
+                        self.errorMessage = "Сообщение отправлено, но не удалось получить ID сообщения для загрузки вложений. Попробуйте отправить сообщение еще раз."
+                    }
+                }
+            } catch {
+                // Clear attachments on error
+                await MainActor.run {
+                    self.attachments.removeAll()
+                    self.errorMessage = "Не удалось отправить сообщение: \(self.describe(error))"
+                }
+                return
+            }
+        } else {
+            // No attachments, just send the message
+            await webSocketService.send(message: message)
+        }
         
         // Notify that message was sent to update chat list
         NotificationCenter.default.post(name: .messageSent, object: nil)
+    }
+
+    // MARK: - Attachments
+    func addAttachment(_ image: UIImage) {
+        let item = AttachmentItem(image: image, state: .pending)
+        attachments.append(item)
+    }
+    
+    func removeAttachment(id: UUID) {
+        attachments.removeAll { $0.id == id }
+    }
+    
+    private func uploadAttachments(conversationId: UUID, messageId: UUID?) async throws -> [UUID] {
+        var result: [UUID] = []
+        let attachmentsToUpload = attachments // Copy to avoid index issues
+        
+        for (index, attachment) in attachmentsToUpload.enumerated() {
+            let id = attachment.id
+            await MainActor.run {
+                if index < attachments.count {
+                    attachments[index].state = .uploading
+                }
+            }
+            do {
+                let messageIdStr = messageId?.uuidString ?? "nil"
+                let response = try await mediaService.uploadMedia(
+                    image: attachment.image,
+                    conversationId: conversationId,
+                    messageId: messageId
+                )
+                if response.success, let mediaArray = response.data, let firstMedia = mediaArray.first {
+                    result.append(firstMedia.id)
+                    await MainActor.run {
+                        if index < attachments.count {
+                            attachments[index].state = .uploaded(firstMedia.id)
+                        }
+                    }
+                } else {
+                    let errMsg = response.error ?? response.message ?? "Не удалось загрузить файл"
+                    if let data = response.data {
+                    }
+                    await MainActor.run {
+                        if index < attachments.count {
+                            attachments[index].state = .failed(errMsg)
+                        }
+                    }
+                    throw AuthError.serverError(errMsg)
+                }
+            } catch {
+                await MainActor.run {
+                    if index < attachments.count {
+                        attachments[index].state = .failed(error.localizedDescription)
+                    }
+                }
+                throw error
+            }
+        }
+        // Don't clear attachments here - let sendMessageAsync do it after all operations complete
+        return result
+    }
+    
+    /// Reload a specific message from API to get updated media
+    @MainActor
+    private func reloadMessage(messageId: UUID) async {
+        guard let conversationId = conversationId, let currentUserId = currentUserId else {
+            return
+        }
+        
+        
+        do {
+            // Reload all messages to get the updated one
+            let response = try await conversationService.getMessages(conversationId: conversationId, skip: 0, limit: 100)
+            
+            guard response.success, let allMessages = response.data else {
+                return
+            }
+            
+            // Find the updated message
+            if let updatedMessage = allMessages.first(where: { $0.id == messageId }) {
+                
+                // Update the message in the list
+                if let index = messages.firstIndex(where: { $0.id == messageId }) {
+                    let updatedDisplayMessage = MessageDisplay(from: updatedMessage, currentUserId: currentUserId, recipientId: recipientId)
+                    messages[index] = updatedDisplayMessage
+                    messages.sort { $0.timestamp < $1.timestamp }
+                } else {
+                    let updatedDisplayMessage = MessageDisplay(from: updatedMessage, currentUserId: currentUserId, recipientId: recipientId)
+                    messages.append(updatedDisplayMessage)
+                    messages.sort { $0.timestamp < $1.timestamp }
+                }
+            } else {
+            }
+        } catch {
+        }
     }
     
     func startTyping() {
@@ -470,4 +593,46 @@ final class ChatViewModel: ObservableObject {
             await webSocketService.send(message: unsubscribeMessage)
         }
     }
+
+    // MARK: - Error description
+    private func describe(_ error: Error) -> String {
+        guard let authError = error as? AuthError else {
+            return error.localizedDescription
+        }
+        
+        switch authError {
+        case .serverError(let message):
+            return message
+        case .decodingError:
+            return "Ошибка разбора ответа сервера"
+        case .invalidURL:
+            return "Некорректный адрес запроса"
+        case .invalidResponse:
+            return "Некорректный ответ сервера"
+        @unknown default:
+            return error.localizedDescription
+        }
+    }
+}
+
+// MARK: - Attachment Item
+struct AttachmentItem: Identifiable, Hashable {
+    let id: UUID = UUID()
+    let image: UIImage
+    var state: AttachmentState
+    
+    static func == (lhs: AttachmentItem, rhs: AttachmentItem) -> Bool {
+        lhs.id == rhs.id
+    }
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+enum AttachmentState: Hashable {
+    case pending
+    case uploading
+    case uploaded(UUID)
+    case failed(String)
 }

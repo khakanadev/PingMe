@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 // MARK: - Main View
 struct ChatView: View {
@@ -6,6 +7,8 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @FocusState private var isInputFocused: Bool
     @State private var typingTimer: Timer?
+    @State private var selectedItems: [PhotosPickerItem] = []
+    @State private var selectedMedia: MessageMedia? = nil
 
     // MARK: - Initialization
     init(recipientId: UUID, recipientName: String, recipientUsername: String? = nil, recipientAvatarUrl: String? = nil, isRecipientOnline: Bool = true, conversationId: UUID? = nil) {
@@ -65,6 +68,9 @@ struct ChatView: View {
                 Text(error)
             }
         }
+        .fullScreenCover(item: $selectedMedia) { media in
+            MediaViewerView(mediaId: media.id)
+        }
     }
 
     // MARK: - UI Components
@@ -84,9 +90,9 @@ struct ChatView: View {
                         .frame(width: 40, height: 40)
                         .clipShape(Circle())
                 } placeholder: {
-                    Circle()
-                        .fill(Color(uiColor: .systemGray5))
-                        .frame(width: 40, height: 40)
+            Circle()
+                .fill(Color(uiColor: .systemGray5))
+                .frame(width: 40, height: 40)
                         .overlay(
                             ProgressView()
                                 .scaleEffect(0.6)
@@ -168,7 +174,7 @@ struct ChatView: View {
                 }
             } else {
                 ScrollViewReader { proxy in
-                    LazyVStack(spacing: 12) {
+        LazyVStack(spacing: 12) {
                         if viewModel.messages.isEmpty {
                             VStack {
                                 Spacer()
@@ -182,10 +188,15 @@ struct ChatView: View {
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
-                            ForEach(viewModel.messages) { message in
-                                MessageBubble(message: message)
-                                    .id(message.id)
-                            }
+            ForEach(viewModel.messages) { message in
+                MessageBubble(
+                    message: message,
+                    onMediaTap: { media in
+                        selectedMedia = media
+                    }
+                )
+                .id(message.id)
+            }
                         }
                         
                         if viewModel.isTyping {
@@ -197,9 +208,9 @@ struct ChatView: View {
                                 Spacer()
                             }
                             .padding(.horizontal)
-                        }
-                    }
-                    .padding()
+            }
+        }
+        .padding()
                     .onChange(of: viewModel.messages.count) { oldCount in
                         let newCount = viewModel.messages.count
                         if newCount > oldCount, let lastMessage = viewModel.messages.last {
@@ -215,10 +226,62 @@ struct ChatView: View {
 
     // MARK: - Message Input
     private var messageInputField: some View {
+        VStack(spacing: 8) {
+            if !viewModel.attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(viewModel.attachments, id: \.id) { item in
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: item.image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 64, height: 64)
+                                    .clipped()
+                                    .cornerRadius(12)
+                                
+                                Button(action: {
+                                    viewModel.removeAttachment(id: item.id)
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(.white)
+                                        .background(Color.black.opacity(0.6))
+                                        .clipShape(Circle())
+                                }
+                                .offset(x: 6, y: -6)
+                                
+                                if case .uploading = item.state {
+                                    ProgressView()
+                                        .tint(.white)
+                                        .frame(width: 64, height: 64)
+                                        .background(Color.black.opacity(0.3))
+                                        .cornerRadius(12)
+                                }
+                            }
+                            .padding(.top, 8)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 4)
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 4)
+            }
+            
         HStack(spacing: 12) {
-            Button(action: {}) {
+                PhotosPicker(selection: $selectedItems, matching: .images) {
                 Image(systemName: "paperclip")
                     .font(.title2)
+            }
+                .onChange(of: selectedItems) { _, items in
+                    Task {
+                        for item in items {
+                            if let data = try? await item.loadTransferable(type: Data.self),
+                               let image = UIImage(data: data) {
+                                viewModel.addAttachment(image)
+                            }
+                        }
+                        selectedItems.removeAll()
+                    }
             }
 
             TextField("Введите сообщение...", text: $viewModel.newMessageText)
@@ -226,54 +289,45 @@ struct ChatView: View {
                 .background(Color(uiColor: .systemGray6))
                 .cornerRadius(20)
                 .focused($isInputFocused)
-                .onChange(of: viewModel.newMessageText) { oldValue in
-                    let newValue = viewModel.newMessageText
-                    if !newValue.isEmpty && oldValue.isEmpty {
-                        viewModel.startTyping()
-                    }
-                    
-                    // Reset typing timer
-                    typingTimer?.invalidate()
-                    typingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
-                        if !viewModel.newMessageText.isEmpty {
-                            viewModel.stopTyping()
+                    .onChange(of: viewModel.newMessageText) { oldValue in
+                        let newValue = viewModel.newMessageText
+                        if !newValue.isEmpty && oldValue.isEmpty {
+                            viewModel.startTyping()
+                        }
+                        
+                        // Reset typing timer
+                        typingTimer?.invalidate()
+                        typingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+                            if !viewModel.newMessageText.isEmpty {
+                                viewModel.stopTyping()
+                            }
                         }
                     }
-                }
                 .onSubmit {
-                    viewModel.stopTyping()
+                        viewModel.stopTyping()
                     viewModel.sendMessage()
                 }
 
-            if viewModel.newMessageText.isEmpty {
-                Button(action: {}) {
-                    Image(systemName: "mic")
-                        .font(.title2)
-                }
-
-                Button(action: {}) {
-                    Image(systemName: "video")
-                        .font(.title2)
-                }
-            } else {
                 Button(action: {
                     viewModel.sendMessage()
                     isInputFocused = false
                 }) {
                     Image(systemName: "paperplane.fill")
                         .font(.title2)
-                        .foregroundColor(Color(hex: "#CADDAD"))
-                }
+                        .foregroundColor(viewModel.isSending ? Color.gray : Color(hex: "#CADDAD"))
             }
+            .disabled(viewModel.isSending)
         }
         .padding()
         .foregroundColor(.black)
+        }
     }
 }
 
 // MARK: - Message Bubble Component
 struct MessageBubble: View {
     let message: MessageDisplay
+    let onMediaTap: (MessageMedia) -> Void
 
     var body: some View {
         HStack {
@@ -287,28 +341,80 @@ struct MessageBubble: View {
                         .padding(.horizontal, 4)
                 }
                 
-                Text(message.isDeleted ? "Сообщение удалено" : message.content)
+                VStack(alignment: message.isFromCurrentUser ? .trailing : .leading, spacing: 8) {
+                    // Check if content is empty (only whitespace)
+                    let trimmedContent = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let hasText = !trimmedContent.isEmpty
+                    
+                    if !message.media.isEmpty {
+                        ForEach(message.media) { media in
+                            // Use mediaId to load through API endpoint (authenticated)
+                            ZStack(alignment: .bottomTrailing) {
+                                CachedAsyncImage(urlString: nil, mediaId: media.id) { image in
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 200, height: 200)
+                                        .clipped()
+                                        .cornerRadius(16)
+                                } placeholder: {
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(Color(uiColor: .systemGray5))
+                                        .frame(width: 200, height: 200)
+                                        .overlay(ProgressView())
+                                }
+                                
+                                // Show timestamp overlay on media if no text
+                                if !hasText {
+                                    HStack(spacing: 4) {
+                                        Text(message.timestamp.formattedTime())
+                                            .font(.caption2)
+                                            .foregroundColor(.white)
+                                        
+                                        if message.isEdited {
+                                            Image(systemName: "pencil")
+                                                .font(.caption2)
+                                                .foregroundColor(.white)
+                                        }
+                                    }
+                                    .padding(8)
+                                    .background(Color.black.opacity(0.5))
+                                    .cornerRadius(8)
+                                    .padding(8)
+                                }
+                            }
+                            .onTapGesture {
+                                onMediaTap(media)
+                            }
+                        }
+                    }
+                    
+                    // Only show text bubble if there's actual text
+                    if hasText {
+                        Text(message.isDeleted ? "Сообщение удалено" : message.content)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .padding(.bottom, 16)
                     .overlay(
-                        HStack(spacing: 4) {
-                            Text(message.timestamp.formattedTime())
-                                .font(.caption2)
-                                .foregroundColor(.gray)
-                            
-                            if message.isEdited {
-                                Image(systemName: "pencil")
-                                    .font(.caption2)
-                                    .foregroundColor(.gray)
-                            }
-                        }
-                        .padding([.trailing, .bottom], 8),
+                                HStack(spacing: 4) {
+                        Text(message.timestamp.formattedTime())
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                                    
+                                    if message.isEdited {
+                                        Image(systemName: "pencil")
+                                            .font(.caption2)
+                                            .foregroundColor(.gray)
+                                    }
+                                }
+                            .padding([.trailing, .bottom], 8),
                         alignment: .bottomTrailing
                     )
                     .background(message.isFromCurrentUser ? Color(uiColor: .systemGray5) : .white)
                     .cornerRadius(20)
-                    .opacity(message.isDeleted ? 0.6 : 1.0)
+                            .opacity(message.isDeleted ? 0.6 : 1.0)
+                    }
+                }
             }
 
             if !message.isFromCurrentUser { Spacer() }
