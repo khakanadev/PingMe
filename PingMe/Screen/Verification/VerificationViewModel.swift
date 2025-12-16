@@ -49,12 +49,13 @@ class VerificationViewModel {
 
     // MARK: - Input Handling
     func handleCodeInput(at index: Int, newValue: String) -> Int? {
-        if newValue.count > 1 {
-            verificationCode[index] = String(newValue.prefix(1))
-        }
+        // Handle single character input only (paste is handled separately)
         if !newValue.isEmpty && !newValue.allSatisfy({ $0.isNumber }) {
             verificationCode[index] = ""
+            return nil
         }
+        
+        verificationCode[index] = newValue.isEmpty ? "" : String(newValue.prefix(1))
 
         if !newValue.isEmpty && index < 5 {
             return index + 1
@@ -65,6 +66,25 @@ class VerificationViewModel {
         }
 
         return nil
+    }
+    
+    // MARK: - Paste Handling
+    @MainActor
+    func pasteCode(_ code: String) {
+        // Extract only digits and limit to 6
+        let digits = code.filter { $0.isNumber }.prefix(6)
+        let digitsString = String(digits)
+        
+        // Create new array with all values at once to trigger single SwiftUI update
+        var newCodeArray = Array(repeating: "", count: 6)
+        for (index, char) in digitsString.enumerated() {
+            if index < 6 {
+                newCodeArray[index] = String(char)
+            }
+        }
+        
+        // Update all fields at once - this triggers a single SwiftUI update
+        verificationCode = newCodeArray
     }
 
     // MARK: - Lifecycle Methods

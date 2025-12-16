@@ -60,8 +60,7 @@ struct VerificationView: View {
                 .padding(.leading, 21)
 
                 Text("Confirmation")
-                    .font(.custom("Inter", size: 40))
-                    .fontWeight(.medium)
+                    .font(.system(size: 40, weight: .medium))
                     .lineSpacing(62.93)
                     .padding(.leading, 21)
 
@@ -72,40 +71,59 @@ struct VerificationView: View {
 
                 HStack(spacing: 12) {
                     ForEach(0..<6) { index in
-                        TextField("", text: $viewModel.verificationCode[index])
-                            .frame(width: 45, height: 45)
-                            .background(Color(hex: "#CADDAD"))
-                            .cornerRadius(8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8).stroke(Color.black, lineWidth: 1)
-                            )
-                            .multilineTextAlignment(.center)
-                            .keyboardType(.numberPad)
-                            .focused($focusedField, equals: index)
-                            .onChange(of: viewModel.verificationCode[index]) { oldValue, newValue in
-                                if let nextField = viewModel.handleCodeInput(
-                                    at: index, newValue: newValue) {
-                                    focusedField = nextField
-                                }
-                                
-                                // Auto-verify when all 6 digits are entered
-                                let fullCode = viewModel.verificationCode.joined()
-                                if fullCode.count == 6 && fullCode.allSatisfy({ $0.isNumber }) && !isAutoVerifying && !isLoading {
-                                    isAutoVerifying = true
-                                    Task {
-                                        isLoading = true
-                                        if let userData = await viewModel.verifyCode() {
-                                            viewModel.saveUserData(userData)
-                                            routingViewModel.navigateToScreen(.chats)
-                                        } else if let error = viewModel.errorMessage {
-                                            errorMessage = error
-                                            showError = true
+                        PasteableTextField(
+                            text: $viewModel.verificationCode[index],
+                            index: index,
+                            onPaste: { pastedCode in
+                                // Update code immediately
+                                viewModel.pasteCode(pastedCode)
+                                // Check after a brief moment to allow UI to update
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    let fullCode = viewModel.verificationCode.joined()
+                                    if fullCode.count == 6 && fullCode.allSatisfy({ $0.isNumber }) && !isAutoVerifying && !isLoading {
+                                        isAutoVerifying = true
+                                        Task {
+                                            isLoading = true
+                                            if let userData = await viewModel.verifyCode() {
+                                                viewModel.saveUserData(userData)
+                                                routingViewModel.navigateToScreen(.chats)
+                                            } else if let error = viewModel.errorMessage {
+                                                errorMessage = error
+                                                showError = true
+                                            }
+                                            isAutoVerifying = false
+                                            isLoading = false
                                         }
-                                        isAutoVerifying = false
-                                        isLoading = false
                                     }
                                 }
                             }
+                        )
+                        .frame(width: 45, height: 45)
+                        .focused($focusedField, equals: index)
+                        .onChange(of: viewModel.verificationCode[index]) { oldValue, newValue in
+                            if let nextField = viewModel.handleCodeInput(
+                                at: index, newValue: newValue) {
+                                focusedField = nextField
+                            }
+                            
+                            // Auto-verify when all 6 digits are entered
+                            let fullCode = viewModel.verificationCode.joined()
+                            if fullCode.count == 6 && fullCode.allSatisfy({ $0.isNumber }) && !isAutoVerifying && !isLoading {
+                                isAutoVerifying = true
+                                Task {
+                                    isLoading = true
+                                    if let userData = await viewModel.verifyCode() {
+                                        viewModel.saveUserData(userData)
+                                        routingViewModel.navigateToScreen(.chats)
+                                    } else if let error = viewModel.errorMessage {
+                                        errorMessage = error
+                                        showError = true
+                                    }
+                                    isAutoVerifying = false
+                                    isLoading = false
+                                }
+                            }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
