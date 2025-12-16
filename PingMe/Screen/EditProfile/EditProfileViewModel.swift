@@ -107,7 +107,6 @@ class EditProfileViewModel {
                 } catch {
                     // If avatar upload fails, don't block the whole save operation
                     // Just log the error but continue
-                    print("Avatar upload error: \(error)")
                     // Don't set errorMessage here - profile was saved successfully
                 }
             }
@@ -172,7 +171,6 @@ class EditProfileViewModel {
             avatarUrl = user.avatarUrl
             validateUsername()
         } catch {
-            print("Failed to load user data: \(error)")
         }
     }
 

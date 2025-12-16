@@ -88,12 +88,10 @@ class RegistrationViewModel {
                 return
             }
 
-            print("Registration successful, setting isFromLogin to false")
             isFromLogin = false
             showVerification = true
 
         } catch {
-            print("Registration error: \(error)")
             errorMessage = error.localizedDescription
         }
     }
@@ -116,7 +114,6 @@ class RegistrationViewModel {
             return response.data
 
         } catch {
-            print("Verification error: \(error)")
             errorMessage = error.localizedDescription
             return nil
         }

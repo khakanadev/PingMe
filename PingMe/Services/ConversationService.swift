@@ -73,37 +73,19 @@ final class ConversationService {
             throw AuthError.invalidURL
         }
         
-        print("🔵 ConversationService: getMessages - conversationId: \(conversationId), skip: \(skip), limit: \(limit)")
-        print("🔵 ConversationService: Full URL: \(url.absoluteString)")
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         // Log request details for backend debugging
-        print("🔵 ConversationService: Request method: \(request.httpMethod ?? "nil")")
-        print("🔵 ConversationService: Request headers: \(request.allHTTPHeaderFields ?? [:])")
-        print("🔵 ConversationService: Request URL: \(request.url?.absoluteString ?? "nil")")
         
         let response: APIResponse<[Message]> = try await perform(request: request)
         
         if let messages = response.data {
-            print("🔵 ConversationService: getMessages returned \(messages.count) messages")
             // Log sender IDs to see if we're getting messages from other users
             let senderIds = Set(messages.map { $0.senderId })
-            print("🔵 ConversationService: Unique sender IDs: \(senderIds.map { $0.uuidString })")
-            print("🔵 ConversationService: ⚠️ BACKEND ISSUE: API returned only \(senderIds.count) unique sender(s), but conversation should have messages from multiple users")
             
-            // Log ALL messages with full details
-            for (index, message) in messages.enumerated() {
-                print("🔵 ConversationService: Message \(index):")
-                print("   - id: \(message.id)")
-                print("   - senderId: \(message.senderId)")
-                print("   - senderName: \(message.senderName)")
-                print("   - sender object: \(message.sender?.name ?? "nil")")
-                print("   - content: \(message.content.prefix(50))")
-                print("   - createdAt: \(message.createdAt)")
-            }
             
             // Check if we're missing messages from other users
             if let userData = UserDefaults.standard.data(forKey: "userData"),
@@ -111,11 +93,9 @@ final class ConversationService {
                 let currentUserId = user.id
                 let otherUserMessages = messages.filter { $0.senderId != currentUserId }
                 if otherUserMessages.isEmpty && messages.count > 0 {
-                    print("🔵 ConversationService: ❌ BACKEND BUG: All \(messages.count) messages are from current user (\(currentUserId)). Missing messages from other participants!")
                 }
             }
         } else {
-            print("🔵 ConversationService: getMessages returned nil data")
         }
         
         return response
@@ -140,16 +120,13 @@ final class ConversationService {
     
     /// Find or create a conversation with a user
     func findOrCreateConversation(with userId: UUID) async throws -> APIResponse<Conversation> {
-        print("🔵 ConversationService: findOrCreateConversation called for userId: \(userId)")
         
         let conversationsResponse = try await getConversations()
         guard let conversations = conversationsResponse.data else {
             return try await attemptCreateConversation(userId: userId)
         }
         
-        print("🔵 ConversationService: Checking \(conversations.count) conversations")
         let dialogConversations = conversations.filter { !$0.isGroup && !$0.isDeleted }
-        print("🔵 ConversationService: Found \(dialogConversations.count) dialog conversations")
         
         // Try to find by participants first
         if let found = try await findConversationByParticipants(dialogConversations: dialogConversations, userId: userId) {
@@ -172,19 +149,15 @@ final class ConversationService {
             guard let participants = conversation.participants, !participants.isEmpty else { return false }
             let hasUser = participants.contains { $0.userId == userId }
             if hasUser {
-                print("🔵 ConversationService: ✅ Found conversation \(conversation.id) - has participant \(userId) in list")
             }
             return hasUser
         }) {
-            print("🔵 ConversationService: ✅ Returning existing conversation \(existingConversation.id)")
             return APIResponse(success: true, message: nil, data: existingConversation, error: nil)
         }
         return nil
     }
     
     private func findConversationByMessages(dialogConversations: [Conversation], userId: UUID) async throws -> APIResponse<Conversation>? {
-        print("🔵 ConversationService: Participants not in list, checking conversations by messages...")
-        print("🔵 ConversationService: Looking for conversation with userId: \(userId)")
         
         // Get current user ID
         var currentUserId: UUID?
@@ -196,21 +169,16 @@ final class ConversationService {
         var conversationsWithOnlyCurrentUser: [(conversation: Conversation, updatedAt: Date)] = []
         
         for conversation in dialogConversations {
-            print("🔵 ConversationService: Checking conversation \(conversation.id)...")
             do {
                 let messagesResponse = try await getMessages(conversationId: conversation.id, skip: 0, limit: 20)
                 guard let messages = messagesResponse.data, !messages.isEmpty else {
-                    print("🔵 ConversationService: Conversation \(conversation.id) has no messages")
                     continue
                 }
                 
                 let senderIds = Set(messages.compactMap { $0.senderId })
-                print("🔵 ConversationService: Conversation \(conversation.id) has \(messages.count) messages")
-                print("🔵 ConversationService: Sender IDs: \(senderIds.map { $0.uuidString })")
                 
                 // Check if conversation has messages from target user
                 if senderIds.contains(userId) {
-                    print("🔵 ConversationService: ✅ Found conversation \(conversation.id) - has messages from userId \(userId)")
                     return APIResponse(success: true, message: nil, data: conversation, error: nil)
                 }
                 
@@ -219,11 +187,9 @@ final class ConversationService {
                 if let currentUserId = currentUserId,
                    senderIds.count == 1,
                    senderIds.contains(currentUserId) {
-                    print("🔵 ConversationService: Conversation \(conversation.id) has messages only from current user - might be the right one")
                     conversationsWithOnlyCurrentUser.append((conversation: conversation, updatedAt: conversation.updatedAt))
                 }
             } catch {
-                print("🔵 ConversationService: ❌ Error checking messages for conversation \(conversation.id): \(error)")
                 continue
             }
         }
@@ -233,22 +199,18 @@ final class ConversationService {
         if !conversationsWithOnlyCurrentUser.isEmpty {
             let mostRecent = conversationsWithOnlyCurrentUser.max(by: { $0.updatedAt < $1.updatedAt })
             if let mostRecent = mostRecent {
-                print("🔵 ConversationService: ✅ Returning most recent conversation with only current user messages: \(mostRecent.conversation.id)")
                 return APIResponse(success: true, message: nil, data: mostRecent.conversation, error: nil)
             }
         }
         
-        print("🔵 ConversationService: No conversation with target user messages found")
         return nil
     }
     
     private func attemptCreateConversation(userId: UUID) async throws -> APIResponse<Conversation> {
-        print("🔵 ConversationService: No existing conversation found, attempting to create new one for userId: \(userId)")
         
         do {
             let createResponse = try await createConversation(participantIds: [userId])
             if createResponse.success {
-                print("🔵 ConversationService: ✅ Created new conversation")
                 return createResponse
             }
             return try await handleFailedCreation(userId: userId, createResponse: createResponse)
@@ -256,16 +218,13 @@ final class ConversationService {
             if is422Error(error) {
                 return try await handle422Error(userId: userId)
             }
-            print("🔵 ConversationService: ❌ Error creating conversation: \(error)")
             throw error
         } catch {
-            print("🔵 ConversationService: ❌ Error creating conversation: \(error)")
             throw error
         }
     }
     
     private func handleFailedCreation(userId: UUID, createResponse: APIResponse<Conversation>) async throws -> APIResponse<Conversation> {
-        print("🔵 ConversationService: ⚠️ Creation failed, reloading conversations to find existing one...")
         try? await Task.sleep(nanoseconds: 500_000_000)
         
         let conversationsResponse = try await getConversations()
@@ -279,7 +238,6 @@ final class ConversationService {
         }
         
         if let mostRecent = dialogConversations.max(by: { $0.updatedAt < $1.updatedAt }) {
-            print("🔵 ConversationService: ✅ Returning most recent conversation \(mostRecent.id)")
             return APIResponse(success: true, message: nil, data: mostRecent, error: nil)
         }
         
@@ -287,7 +245,6 @@ final class ConversationService {
     }
     
     private func handle422Error(userId: UUID) async throws -> APIResponse<Conversation> {
-        print("🔵 ConversationService: ⚠️ Got 422 error - conversation already exists, finding it...")
         try? await Task.sleep(nanoseconds: 300_000_000)
         
         let conversationsResponse = try await getConversations()
@@ -296,7 +253,6 @@ final class ConversationService {
         }
         
         let dialogConversations = conversations.filter { !$0.isGroup && !$0.isDeleted }
-        print("🔵 ConversationService: Checking \(dialogConversations.count) dialog conversations after 422...")
         
         // Get current user ID
         var currentUserId: UUID?
@@ -327,13 +283,11 @@ final class ConversationService {
         
         // Return the most recent candidate
         if let mostRecent = candidates.max(by: { $0.updatedAt < $1.updatedAt }) {
-            print("🔵 ConversationService: ✅ Returning most recent conversation with only current user messages: \(mostRecent.conversation.id)")
             return APIResponse(success: true, message: nil, data: mostRecent.conversation, error: nil)
         }
         
         // If no candidates, return the most recent dialog conversation
         if let mostRecent = dialogConversations.max(by: { $0.updatedAt < $1.updatedAt }) {
-            print("🔵 ConversationService: ✅ Returning most recent conversation \(mostRecent.id) after 422 error")
             return APIResponse(success: true, message: nil, data: mostRecent, error: nil)
         }
         
@@ -345,7 +299,6 @@ final class ConversationService {
             do {
                 let messagesResponse = try await getMessages(conversationId: conversation.id, skip: 0, limit: 1)
                 if let messages = messagesResponse.data, !messages.isEmpty {
-                    print("🔵 ConversationService: ✅ Found conversation \(conversation.id) with messages")
                     return APIResponse(success: true, message: nil, data: conversation, error: nil)
                 }
             } catch {
@@ -417,9 +370,7 @@ final class ConversationService {
         // Log raw response for debugging (especially for getMessages)
         if let responseString = String(data: data, encoding: .utf8) {
             if responseString.count < 5000 {
-                print("🔵 ConversationService: Raw API response: \(responseString)")
             } else {
-                print("🔵 ConversationService: Raw API response (first 2000 chars): \(String(responseString.prefix(2000)))")
             }
         }
         
@@ -427,9 +378,7 @@ final class ConversationService {
             let apiResponse = try decoder.decode(APIResponse<T>.self, from: data)
             return apiResponse
         } catch {
-            print("🔵 ConversationService: Decoding error: \(error)")
             if let responseString = String(data: data, encoding: .utf8) {
-                print("🔵 ConversationService: Full response data: \(responseString)")
             }
             throw AuthError.decodingError
         }

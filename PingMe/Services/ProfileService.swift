@@ -80,9 +80,7 @@ final class ProfileService {
         var request = try authorizedRequest(endpoint: "/api/v1/users/\(userId.uuidString)", method: "GET")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
-        print("🔵 ProfileService: Getting user by ID: \(userId.uuidString)")
         let response: APIResponse<UserBrief> = try await perform(request: request)
-        print("🔵 ProfileService: getUserById response - success: \(response.success), data: \(response.data != nil ? "present" : "nil")")
         return response
     }
 
@@ -117,7 +115,7 @@ final class ProfileService {
             throw AuthError.serverError("Missing access token")
         }
 
-        guard let imageData = image.jpegData(compressionQuality: 0.85) else {
+        guard let imageData = prepareAvatarData(from: image) else {
             throw AuthError.serverError("Failed to convert image to data")
         }
 
@@ -141,6 +139,31 @@ final class ProfileService {
         request.httpBody = body
 
         return try await perform(request: request)
+    }
+
+    // MARK: - Image preparation
+    /// Resize and compress avatar to avoid 413 (Request Entity Too Large)
+    private func prepareAvatarData(from image: UIImage) -> Data? {
+        let maxDimension: CGFloat = 512 // pixels
+        let targetSize = CGSize(width: maxDimension, height: maxDimension)
+
+        let scaledImage: UIImage
+        let aspectWidth = maxDimension / image.size.width
+        let aspectHeight = maxDimension / image.size.height
+        let scaleFactor = min(1.0, min(aspectWidth, aspectHeight)) // only downscale
+
+        if scaleFactor < 1.0 {
+            let newSize = CGSize(width: image.size.width * scaleFactor, height: image.size.height * scaleFactor)
+            let renderer = UIGraphicsImageRenderer(size: newSize)
+            scaledImage = renderer.image { _ in
+                image.draw(in: CGRect(origin: .zero, size: newSize))
+            }
+        } else {
+            scaledImage = image
+        }
+
+        // Compress to reasonable quality to keep size small
+        return scaledImage.jpegData(compressionQuality: 0.65)
     }
 
     // MARK: - Internal helpers
@@ -221,32 +244,27 @@ final class ProfileService {
 
         // Check HTTP status code first
         if httpResponse.statusCode >= 200 && httpResponse.statusCode < 300 {
-            // Try decoding standard APIResponse first
-            if let apiResponse = try? decoder.decode(APIResponse<R>.self, from: data) {
-                print("🔵 ProfileService: Successfully decoded APIResponse")
-                return apiResponse
-            }
+        // Try decoding standard APIResponse first
+        if let apiResponse = try? decoder.decode(APIResponse<R>.self, from: data) {
+            return apiResponse
+        }
 
-            // Try decoding raw model and wrap it
-            if let model = try? decoder.decode(R.self, from: data) {
-                print("🔵 ProfileService: Successfully decoded raw model")
-                return APIResponse(success: true, message: nil, data: model, error: nil)
-            }
+        // Try decoding raw model and wrap it
+        if let model = try? decoder.decode(R.self, from: data) {
+            return APIResponse(success: true, message: nil, data: model, error: nil)
+        }
 
-            // Try detail wrapper from backend
-            if let wrapped = try? decoder.decode(DetailWrapper<R>.self, from: data) {
-                print("🔵 ProfileService: Successfully decoded DetailWrapper")
-                return wrapped.detail
+        // Try detail wrapper from backend
+        if let wrapped = try? decoder.decode(DetailWrapper<R>.self, from: data) {
+            return wrapped.detail
             }
             
             // If all decoding attempts failed, log the raw response
             if let responseString = String(data: data, encoding: .utf8) {
-                print("🔵 ProfileService: Failed to decode response. Raw data: \(responseString)")
             }
         } else {
             // Non-2xx status code - try to decode error message
             if let responseString = String(data: data, encoding: .utf8) {
-                print("🔵 ProfileService: HTTP \(httpResponse.statusCode) error: \(responseString)")
                 throw AuthError.serverError("HTTP \(httpResponse.statusCode): \(responseString)")
             }
         }
@@ -261,7 +279,7 @@ final class ProfileService {
 }
 
 // MARK: - Multipart helpers
-private extension Data {
+extension Data {
     mutating func appendString(_ string: String) {
         if let data = string.data(using: .utf8) {
             append(data)
