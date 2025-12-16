@@ -27,6 +27,7 @@ final class ChatViewModel: ObservableObject {
     @Published var isAtBottom: Bool = true
     
     // MARK: - Private Properties
+    private var isCurrentlyTyping: Bool = false // Track if we've sent typing_start
     private let conversationService = ConversationService()
     private let webSocketService = WebSocketService.shared
     private let mediaService = MediaService()
@@ -677,6 +678,11 @@ final class ChatViewModel: ObservableObject {
     func startTyping() {
         guard let conversationId = conversationId else { return }
         
+        // Don't send typing_start if we're already typing
+        guard !isCurrentlyTyping else { return }
+        
+        isCurrentlyTyping = true
+        
         Task {
             let typingMessage = WebSocketOutgoingMessage(
                 type: .typingStart,
@@ -695,6 +701,11 @@ final class ChatViewModel: ObservableObject {
     
     func stopTyping() {
         guard let conversationId = conversationId else { return }
+        
+        // Don't send typing_stop if we're not typing
+        guard isCurrentlyTyping else { return }
+        
+        isCurrentlyTyping = false
         
         Task {
             let typingMessage = WebSocketOutgoingMessage(
@@ -735,6 +746,11 @@ final class ChatViewModel: ObservableObject {
     
     @MainActor
     func cleanup() {
+        // Stop typing when cleaning up
+        if isCurrentlyTyping {
+            stopTyping()
+        }
+        
         guard let conversationId = conversationId else { return }
         
         webSocketService.removeMessageHandler(conversationId: conversationId)

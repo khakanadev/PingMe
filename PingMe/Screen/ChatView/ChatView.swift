@@ -186,10 +186,12 @@ struct ChatView: View {
         }
         .navigationBarHidden(true)
         .onDisappear {
+            // Stop typing when leaving chat
+            typingTimer?.invalidate()
+            viewModel.stopTyping()
             Task { @MainActor in
                 viewModel.cleanup()
             }
-            typingTimer?.invalidate()
         }
         .alert("Ошибка", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -392,16 +394,6 @@ struct ChatView: View {
                         }
                     }
                     
-                    if viewModel.isTyping {
-                        HStack {
-                            Text("\(viewModel.typingUserName) печатает...")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                                .italic()
-                            Spacer()
-                        }
-                        .padding(.horizontal)
-                    }
                 }
                 .padding()
             }
@@ -451,6 +443,19 @@ struct ChatView: View {
                 .padding(.bottom, 4)
             }
             
+            // Typing indicator above input field (always visible)
+            if viewModel.isTyping {
+                HStack {
+                    Text("\(viewModel.typingUserName) печатает...")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .italic()
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 4)
+            }
+            
         HStack(spacing: 12) {
                 PhotosPicker(selection: $selectedItems, matching: .images) {
                 Image(systemName: "paperclip")
@@ -487,16 +492,45 @@ struct ChatView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .onChange(of: viewModel.newMessageText) { oldValue, newValue in
+                        // If text becomes empty, stop typing immediately
+                        if newValue.isEmpty && !oldValue.isEmpty {
+                            typingTimer?.invalidate()
+                            viewModel.stopTyping()
+                            return
+                        }
+                        
+                        // If user starts typing (text was empty, now has content)
                         if !newValue.isEmpty && oldValue.isEmpty {
+                            // Only start typing if keyboard is focused
+                            if isInputFocused {
+                                viewModel.startTyping()
+                            }
+                        }
+                        
+                        // If user continues typing, reset the timer
+                        if !newValue.isEmpty {
+                            typingTimer?.invalidate()
+                            // Only send typing if keyboard is focused
+                            if isInputFocused {
+                                typingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
+                                    // Auto-stop typing after 3 seconds of inactivity
+                                    if !viewModel.newMessageText.isEmpty {
+                                        viewModel.stopTyping()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .onChange(of: isInputFocused) { oldValue, newValue in
+                        // When keyboard opens and there's text, start typing
+                        if newValue && !viewModel.newMessageText.isEmpty {
                             viewModel.startTyping()
                         }
                         
-                        // Reset typing timer
-                        typingTimer?.invalidate()
-                        typingTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { _ in
-                            if !viewModel.newMessageText.isEmpty {
-                                viewModel.stopTyping()
-                            }
+                        // When keyboard closes, stop typing immediately
+                        if !newValue && oldValue {
+                            typingTimer?.invalidate()
+                            viewModel.stopTyping()
                         }
                     }
             }
@@ -505,6 +539,9 @@ struct ChatView: View {
             .cornerRadius(20)
 
                 Button(action: {
+                    // Stop typing when sending message
+                    typingTimer?.invalidate()
+                    viewModel.stopTyping()
                     viewModel.sendMessage()
                     // Keep keyboard open after sending for continued typing
                 }) {
