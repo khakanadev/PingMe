@@ -169,6 +169,21 @@ struct ChatView: View {
             )
             .ignoresSafeArea()
         )
+        .overlay {
+            if viewModel.isLoading {
+                ZStack {
+                    Color.black.opacity(0.1)
+                        .ignoresSafeArea()
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text("Загрузка...")
+                            .foregroundColor(.gray)
+                            .font(.subheadline)
+                    }
+                }
+            }
+        }
         .navigationBarHidden(true)
         .onDisappear {
             Task { @MainActor in
@@ -304,16 +319,7 @@ struct ChatView: View {
     // MARK: - Chat Content
     private var chatContent: some View {
         Group {
-            if viewModel.isLoading {
-                VStack {
-                    Spacer()
-                    ProgressView()
-                    Text("Загрузка...")
-                        .foregroundColor(.gray)
-                        .padding(.top)
-                    Spacer()
-                }
-            } else if let error = viewModel.errorMessage {
+            if let error = viewModel.errorMessage {
                 VStack {
                     Spacer()
                     Text("Ошибка")
@@ -328,7 +334,7 @@ struct ChatView: View {
             } else {
                 LazyVStack(spacing: 12) {
                     // Load older messages indicator
-                    if viewModel.hasMoreMessages {
+                    if viewModel.hasMoreMessages && !viewModel.isLoading {
                         HStack {
                             Spacer()
                             if viewModel.isLoadingOlderMessages {
@@ -356,7 +362,7 @@ struct ChatView: View {
                         }
                     }
                     
-                    if viewModel.messages.isEmpty {
+                    if viewModel.messages.isEmpty && !viewModel.isLoading {
                         VStack {
                             Spacer()
                             Text("Нет сообщений")
@@ -368,7 +374,7 @@ struct ChatView: View {
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
+                    } else if !viewModel.messages.isEmpty {
                         ForEach(viewModel.messages) { message in
                             MessageBubble(
                                 message: message,

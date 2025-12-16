@@ -31,10 +31,7 @@ struct ChatsView: View {
                     header
                     ScrollView {
                         VStack(spacing: 0) {
-                            if viewModel.isLoading {
-                                ProgressView()
-                                    .padding()
-                            } else if viewModel.chats.isEmpty {
+                            if viewModel.chats.isEmpty && !viewModel.isLoading {
                                 VStack {
                                     Spacer()
                                     Text("Нет чатов")
@@ -43,7 +40,22 @@ struct ChatsView: View {
                                     Spacer()
                                 }
                             } else {
-                            chatsList
+                                chatsList
+                            }
+                        }
+                    }
+                }
+                .overlay {
+                    if viewModel.isLoading {
+                        ZStack {
+                            Color.black.opacity(0.1)
+                                .ignoresSafeArea()
+                            VStack(spacing: 12) {
+                                ProgressView()
+                                    .controlSize(.large)
+                                Text("Загрузка...")
+                                    .foregroundColor(.gray)
+                                    .font(.subheadline)
                             }
                         }
                     }
