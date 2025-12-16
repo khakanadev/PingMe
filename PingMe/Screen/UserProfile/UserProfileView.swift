@@ -155,8 +155,8 @@ struct UserProfileView: View {
                 
                 // Action Buttons
                 if showWriteButton {
-                    HStack(spacing: 12) {
-                        Button(action: {
+                HStack(spacing: 12) {
+                    Button(action: {
                             if let onOpenChat = onOpenChat {
                                 onOpenChat(user.id, user.name, user.isOnline)
                                 dismiss()
@@ -168,34 +168,34 @@ struct UserProfileView: View {
                                 )
                                 dismiss()
                             }
-                        }) {
-                            Text("Написать")
-                                .foregroundColor(.black)
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 50)
-                                .background(Color(hex: "#CADDAD"))
-                                .cornerRadius(12)
-                        }
-                        
-                        Button(action: {
-                            shareContact()
-                        }) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.title3)
-                                .foregroundColor(.white)
-                                .frame(width: 60)
-                                .frame(height: 50)
-                                .background(Color(hex: "#444444"))
-                                .cornerRadius(12)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                                )
-                        }
+                    }) {
+                        Text("Написать")
+                            .foregroundColor(.black)
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color(hex: "#CADDAD"))
+                            .cornerRadius(12)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 30)
+                    
+                    Button(action: {
+                        shareContact()
+                    }) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.title3)
+                            .foregroundColor(.white)
+                            .frame(width: 60)
+                            .frame(height: 50)
+                            .background(Color(hex: "#444444"))
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                            )
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 30)
                 } else {
                     Button(action: {
                         shareContact()

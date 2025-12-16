@@ -13,6 +13,11 @@ struct ChatView: View {
     @State private var showUserProfile: Bool = false
     @State private var userProfileData: UserBrief? = nil
     @State private var isLoadingProfile: Bool = false
+    @State private var scrollOffset: CGFloat = 0
+    @State private var contentHeight: CGFloat = 0
+    @State private var scrollViewHeight: CGFloat = 0
+    @State private var hasScrolledToBottom: Bool = false
+    @State private var savedScrollPosition: UUID? = nil
 
     // MARK: - Initialization
     init(recipientId: UUID, recipientName: String, recipientUsername: String? = nil, recipientAvatarUrl: String? = nil, isRecipientOnline: Bool = true, conversationId: UUID? = nil) {
@@ -31,17 +36,128 @@ struct ChatView: View {
         VStack(spacing: 0) {
             header
 
-            ScrollView {
-                chatContent
-            }
-            .scrollDismissesKeyboard(.immediately)
-            .scrollIndicators(.hidden)
-            .simultaneousGesture(
-                TapGesture()
-                    .onEnded { _ in
-                        isInputFocused = false
+            ZStack(alignment: .bottomTrailing) {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        GeometryReader { geometry in
+                            Color.clear
+                                .preference(key: ScrollOffsetPreferenceKey.self, value: geometry.frame(in: .named("scroll")).minY)
+                        }
+                        .frame(height: 0)
+                        
+                        chatContent
+                            .background(
+                                GeometryReader { geometry in
+                                    Color.clear
+                                        .preference(key: ContentHeightPreferenceKey.self, value: geometry.size.height)
+                                }
+                            )
                     }
-            )
+                    .coordinateSpace(name: "scroll")
+                    .scrollDismissesKeyboard(.immediately)
+                    .scrollIndicators(.hidden)
+                    .simultaneousGesture(
+                        TapGesture()
+                            .onEnded { _ in
+                                isInputFocused = false
+                            }
+                    )
+                    .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                        scrollOffset = value
+                        updateScrollPosition(proxy: proxy)
+                    }
+                    .onPreferenceChange(ContentHeightPreferenceKey.self) { value in
+                        contentHeight = value
+                        updateScrollPosition(proxy: proxy)
+                    }
+                    .background(
+                        GeometryReader { geometry in
+                            Color.clear
+                                .preference(key: ScrollViewHeightPreferenceKey.self, value: geometry.size.height)
+                        }
+                    )
+                    .onPreferenceChange(ScrollViewHeightPreferenceKey.self) { value in
+                        scrollViewHeight = value
+                        updateScrollPosition(proxy: proxy)
+                    }
+                    .onAppear {
+                        // Restore scroll position or scroll to bottom immediately without animation
+                        if let savedPosition = viewModel.getSavedScrollPosition(),
+                           viewModel.messages.contains(where: { $0.id == savedPosition }) {
+                            // Use immediate scroll without animation for saved position
+                            proxy.scrollTo(savedPosition, anchor: .center)
+                            savedScrollPosition = savedPosition
+                        } else if let lastMessage = viewModel.messages.last, !hasScrolledToBottom {
+                            // Scroll to bottom immediately without animation on first load
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            hasScrolledToBottom = true
+                            viewModel.isAtBottom = true
+                        }
+                    }
+                    .onChange(of: viewModel.messages.count) { oldCount, newCount in
+                        if newCount > oldCount {
+                            if let lastMessage = viewModel.messages.last {
+                                if viewModel.isAtBottom {
+                                    // Auto-scroll to bottom if user is already at bottom (with animation for new messages)
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        withAnimation {
+                                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                        }
+                                    }
+                                }
+                            }
+                        } else if oldCount == 0 && newCount > 0 {
+                            // First load: scroll to bottom immediately without animation
+                            if let lastMessage = viewModel.messages.last, !hasScrolledToBottom {
+                                // Use a tiny delay to ensure layout is complete, but no animation
+                                DispatchQueue.main.async {
+                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                    hasScrolledToBottom = true
+                                    viewModel.isAtBottom = true
+                                }
+                            }
+                        }
+                    }
+                    .onChange(of: viewModel.isLoading) { isLoading in
+                        // When loading finishes, scroll to bottom if we haven't scrolled yet
+                        if !isLoading && !hasScrolledToBottom, let lastMessage = viewModel.messages.last {
+                            DispatchQueue.main.async {
+                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                hasScrolledToBottom = true
+                                viewModel.isAtBottom = true
+                            }
+                        }
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        // New message indicator
+                        if viewModel.unreadMessageCount > 0 && !viewModel.isAtBottom {
+                            Button(action: {
+                                if let lastMessage = viewModel.messages.last {
+                                    withAnimation {
+                                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                    }
+                                    viewModel.isAtBottom = true
+                                    viewModel.markAsRead()
+                                }
+                            }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "arrow.down")
+                                    Text("\(viewModel.unreadMessageCount) нов\(viewModel.unreadMessageCount == 1 ? "ое" : "ых")")
+                                }
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(Color(hex: "#CADDAD"))
+                                .cornerRadius(20)
+                                .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                            }
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 100)
+                        }
+                    }
+                }
+            }
 
             messageInputField
         }
@@ -138,7 +254,7 @@ struct ChatView: View {
                         )
                         .frame(width: 40, height: 40)
                         .overlay(
-                            Text(viewModel.recipientName.prefix(1).uppercased())
+                            Text((viewModel.recipientName.isEmpty ? "П" : viewModel.recipientName).prefix(1).uppercased())
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundColor(.white)
                         )
@@ -151,7 +267,7 @@ struct ChatView: View {
                 loadUserProfile()
             }) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(viewModel.recipientName)
+                    Text(viewModel.recipientName.isEmpty ? "Пользователь" : viewModel.recipientName)
                         .font(.system(size: 16, weight: .semibold))
 
                     HStack(spacing: 4) {
@@ -210,53 +326,78 @@ struct ChatView: View {
                     Spacer()
                 }
             } else {
-                ScrollViewReader { proxy in
-        LazyVStack(spacing: 12) {
-                        if viewModel.messages.isEmpty {
-                            VStack {
-                                Spacer()
-                                Text("Нет сообщений")
-                                    .foregroundColor(.gray)
-                                Text("Начните общение, отправив сообщение")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                                    .padding(.top, 4)
-                                Spacer()
+                LazyVStack(spacing: 12) {
+                    // Load older messages indicator
+                    if viewModel.hasMoreMessages {
+                        HStack {
+                            Spacer()
+                            if viewModel.isLoadingOlderMessages {
+                                ProgressView()
+                                    .padding()
+                            } else {
+                                Button(action: {
+                                    Task {
+                                        await viewModel.loadOlderMessages()
+                                    }
+                                }) {
+                                    Text("Загрузить старые сообщения")
+                                        .font(.caption)
+                                        .foregroundColor(.gray)
+                                        .padding(.vertical, 8)
+                                }
                             }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-            ForEach(viewModel.messages) { message in
-                MessageBubble(
-                    message: message,
-                    onMediaTap: { media in
-                        selectedMedia = media
+                            Spacer()
+                        }
+                        .onAppear {
+                            // Auto-load when scrolling to top
+                            Task {
+                                await viewModel.loadOlderMessages()
+                            }
+                        }
                     }
-                )
-                .id(message.id)
-            }
+                    
+                    if viewModel.messages.isEmpty {
+                        VStack {
+                            Spacer()
+                            Text("Нет сообщений")
+                                .foregroundColor(.gray)
+                            Text("Начните общение, отправив сообщение")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                                .padding(.top, 4)
+                            Spacer()
                         }
-                        
-                        if viewModel.isTyping {
-                            HStack {
-                                Text("\(viewModel.typingUserName) печатает...")
-                                    .font(.caption)
-                                    .foregroundColor(.gray)
-                                    .italic()
-                                Spacer()
-                            }
-                            .padding(.horizontal)
-            }
-        }
-        .padding()
-                    .onChange(of: viewModel.messages.count) { oldCount in
-                        let newCount = viewModel.messages.count
-                        if newCount > oldCount, let lastMessage = viewModel.messages.last {
-                            withAnimation {
-                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ForEach(viewModel.messages) { message in
+                            MessageBubble(
+                                message: message,
+                                onMediaTap: { media in
+                                    selectedMedia = media
+                                }
+                            )
+                            .id(message.id)
+                            .onAppear {
+                                // Save scroll position when message appears
+                                if message.id == viewModel.messages.first?.id {
+                                    viewModel.saveScrollPosition(messageId: message.id)
+                                }
                             }
                         }
+                    }
+                    
+                    if viewModel.isTyping {
+                        HStack {
+                            Text("\(viewModel.typingUserName) печатает...")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                                .italic()
+                            Spacer()
+                        }
+                        .padding(.horizontal)
                     }
                 }
+                .padding()
             }
         }
     }
@@ -500,6 +641,49 @@ struct MessageBubble: View {
             }
 
             if !message.isFromCurrentUser { Spacer() }
+        }
+    }
+}
+
+// MARK: - Preference Keys
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+struct ContentHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+struct ScrollViewHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+// MARK: - Helper Methods
+extension ChatView {
+    private func updateScrollPosition(proxy: ScrollViewProxy) {
+        // Calculate if user is at bottom
+        let threshold: CGFloat = 100 // Consider "at bottom" if within 100 points
+        let isNearBottom = (contentHeight - scrollOffset - scrollViewHeight) < threshold
+        
+        if isNearBottom != viewModel.isAtBottom {
+            viewModel.isAtBottom = isNearBottom
+            if isNearBottom {
+                viewModel.markAsRead()
+            }
+        }
+        
+        // Save scroll position periodically (when scrolling stops)
+        if let firstVisibleMessage = viewModel.messages.first {
+            viewModel.saveScrollPosition(messageId: firstVisibleMessage.id)
         }
     }
 }

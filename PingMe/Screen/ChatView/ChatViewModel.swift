@@ -21,6 +21,10 @@ final class ChatViewModel: ObservableObject {
     @Published var typingUserName: String = ""
     @Published var attachments: [AttachmentItem] = []
     @Published var isSending: Bool = false
+    @Published var hasMoreMessages: Bool = true
+    @Published var isLoadingOlderMessages: Bool = false
+    @Published var unreadMessageCount: Int = 0
+    @Published var isAtBottom: Bool = true
     
     // MARK: - Private Properties
     private let conversationService = ConversationService()
@@ -28,11 +32,15 @@ final class ChatViewModel: ObservableObject {
     private let mediaService = MediaService()
     private var currentUserId: UUID?
     private var isInitializing = false // Prevent multiple initializations
+    private let messagesPerPage = 50
+    private var oldestLoadedMessageId: UUID?
+    private var totalMessagesLoaded: Int = 0
 
     // MARK: - Initialization
     init(recipientId: UUID, recipientName: String, recipientUsername: String? = nil, recipientAvatarUrl: String? = nil, isRecipientOnline: Bool = true, conversationId: UUID? = nil) {
         self.recipientId = recipientId
-        self.recipientName = recipientName
+        // Ensure recipientName is never empty - use fallback if needed
+        self.recipientName = recipientName.isEmpty ? "Пользователь" : recipientName
         self.recipientUsername = recipientUsername
         self.recipientAvatarUrl = recipientAvatarUrl
         self.isRecipientOnline = isRecipientOnline
@@ -164,57 +172,52 @@ final class ChatViewModel: ObservableObject {
             return
         }
         
-        
         do {
-            // Load all messages by using pagination
-            // Start with a large limit to get all messages at once
+            // First, load a batch to determine total count, then load last 50
+            // Start by loading first batch
             var allMessages: [Message] = []
             var skip = 0
-            let limit = 100
+            let batchSize = 100
             var hasMore = true
             
-            while hasMore {
-                let response = try await conversationService.getMessages(conversationId: conversationId, skip: skip, limit: limit)
+            // Load in batches until we have enough or reach the end
+            while hasMore && allMessages.count < messagesPerPage * 2 {
+                let response = try await conversationService.getMessages(
+                    conversationId: conversationId,
+                    skip: skip,
+                    limit: batchSize
+                )
                 
                 guard response.success, let loadedMessages = response.data else {
-                    let errorMsg = response.error ?? "Failed to load messages"
                     break
                 }
-                
                 
                 if loadedMessages.isEmpty {
                     hasMore = false
                 } else {
                     allMessages.append(contentsOf: loadedMessages)
-                    // If we got fewer messages than the limit, we've reached the end
-                    if loadedMessages.count < limit {
+                    if loadedMessages.count < batchSize {
                         hasMore = false
                     } else {
-                        skip += limit
+                        skip += batchSize
                     }
                 }
             }
             
-            
-            // Log all messages to see what we received
-            for (index, message) in allMessages.enumerated() {
-                let isFromCurrentUser = message.senderId == currentUserId
-            }
+            // Take only the last messagesPerPage messages
+            let lastMessages = Array(allMessages.suffix(messagesPerPage))
             
             if let currentUserId = currentUserId {
-                let displayMessages = allMessages.map { MessageDisplay(from: $0, currentUserId: currentUserId, recipientId: recipientId) }
+                let displayMessages = lastMessages.map { MessageDisplay(from: $0, currentUserId: currentUserId, recipientId: recipientId) }
                 let sortedMessages = displayMessages.sorted { $0.timestamp < $1.timestamp }
-                
-                // Log media information
-                for (index, msg) in sortedMessages.enumerated() {
-                    if !msg.media.isEmpty {
-                        for (mediaIndex, media) in msg.media.enumerated() {
-                        }
-                    }
-                }
                 
                 await MainActor.run {
                     messages = sortedMessages
+                    hasMoreMessages = allMessages.count >= messagesPerPage
+                    totalMessagesLoaded = sortedMessages.count
+                    if let oldestMessage = sortedMessages.first {
+                        oldestLoadedMessageId = oldestMessage.id
+                    }
                     isLoading = false
                 }
             } else {
@@ -227,6 +230,96 @@ final class ChatViewModel: ObservableObject {
             await MainActor.run {
                 errorMessage = errorMsg
                 isLoading = false
+            }
+        }
+    }
+    
+    /// Load older messages (pagination when scrolling up)
+    func loadOlderMessages() async {
+        guard let conversationId = conversationId,
+              hasMoreMessages,
+              !isLoadingOlderMessages,
+              let oldestId = oldestLoadedMessageId else {
+            return
+        }
+        
+        await MainActor.run {
+            isLoadingOlderMessages = true
+        }
+        
+        do {
+            // Load older messages by loading from skip = 0
+            // We'll load messages in batches until we have enough older messages
+            var allMessages: [Message] = []
+            var skip = 0
+            let batchSize = 100
+            var hasMore = true
+            var foundCurrentOldest = false
+            
+            // Load messages until we find our current oldest message or have enough
+            while hasMore && !foundCurrentOldest && allMessages.count < totalMessagesLoaded + messagesPerPage * 2 {
+                let response = try await conversationService.getMessages(
+                    conversationId: conversationId,
+                    skip: skip,
+                    limit: batchSize
+                )
+                
+                guard response.success, let loadedMessages = response.data else {
+                    break
+                }
+                
+                if loadedMessages.isEmpty {
+                    hasMore = false
+                    break
+                }
+                
+                // Check if we've found our current oldest message
+                for message in loadedMessages {
+                    if message.id == oldestId {
+                        foundCurrentOldest = true
+                        // Don't include this message, it's already loaded
+                        break
+                    }
+                    allMessages.append(message)
+                }
+                
+                if loadedMessages.count < batchSize {
+                    hasMore = false
+                } else {
+                    skip += batchSize
+                }
+            }
+            
+            // Take only the messagesPerPage most recent older messages (those closest to our current oldest)
+            let olderMessages = Array(allMessages.suffix(messagesPerPage))
+            
+            if let currentUserId = currentUserId {
+                let displayMessages = olderMessages.map { MessageDisplay(from: $0, currentUserId: currentUserId, recipientId: recipientId) }
+                let sortedMessages = displayMessages.sorted { $0.timestamp < $1.timestamp }
+                
+                await MainActor.run {
+                    // Insert older messages at the beginning
+                    let combinedMessages = sortedMessages + messages
+                    let uniqueMessages = Array(Set(combinedMessages.map { $0.id }))
+                        .compactMap { id in combinedMessages.first(where: { $0.id == id }) }
+                        .sorted { $0.timestamp < $1.timestamp }
+                    
+                    messages = uniqueMessages
+                    totalMessagesLoaded = uniqueMessages.count
+                    hasMoreMessages = !foundCurrentOldest || allMessages.count >= messagesPerPage
+                    if let oldestMessage = uniqueMessages.first {
+                        oldestLoadedMessageId = oldestMessage.id
+                    }
+                    isLoadingOlderMessages = false
+                }
+            } else {
+                await MainActor.run {
+                    isLoadingOlderMessages = false
+                }
+            }
+        } catch {
+            await MainActor.run {
+                isLoadingOlderMessages = false
             }
         }
     }
@@ -271,6 +364,11 @@ final class ChatViewModel: ObservableObject {
                 if !self.messages.contains(where: { $0.id == displayMessage.id }) {
                     self.messages.append(displayMessage)
                     self.messages.sort { $0.timestamp < $1.timestamp }
+                    
+                    // If user is not at bottom, increment unread count
+                    if !self.isAtBottom {
+                        self.unreadMessageCount += 1
+                    }
                 } else {
                 }
             }
@@ -592,6 +690,34 @@ final class ChatViewModel: ObservableObject {
         Task {
             await webSocketService.send(message: unsubscribeMessage)
         }
+    }
+    
+    // MARK: - Scroll Position Management
+    
+    func saveScrollPosition(messageId: UUID?) {
+        guard let conversationId = conversationId, let messageId = messageId else { return }
+        let key = "scroll_position_\(conversationId.uuidString)"
+        UserDefaults.standard.set(messageId.uuidString, forKey: key)
+    }
+    
+    func getSavedScrollPosition() -> UUID? {
+        guard let conversationId = conversationId else { return nil }
+        let key = "scroll_position_\(conversationId.uuidString)"
+        if let messageIdString = UserDefaults.standard.string(forKey: key),
+           let messageId = UUID(uuidString: messageIdString) {
+            return messageId
+        }
+        return nil
+    }
+    
+    func clearScrollPosition() {
+        guard let conversationId = conversationId else { return }
+        let key = "scroll_position_\(conversationId.uuidString)"
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+    
+    func markAsRead() {
+        unreadMessageCount = 0
     }
 
     // MARK: - Error description
