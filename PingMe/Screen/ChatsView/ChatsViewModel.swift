@@ -28,6 +28,11 @@ class ChatsViewModel {
     var isLoading: Bool = false
     var errorMessage: String?
     
+    // MARK: - Cache Management
+    private var lastLoadTime: Date?
+    private var isDataLoaded: Bool = false
+    private let cacheValidityDuration: TimeInterval = 30 // Cache valid for 30 seconds
+    
     // MARK: - Chat Info
     struct ChatInfo: Identifiable, Hashable {
         let id: UUID
@@ -165,9 +170,22 @@ class ChatsViewModel {
     
     // MARK: - Load Conversations
     @MainActor
-    func loadConversations() async {
+    func loadConversations(forceReload: Bool = false) async {
+        // Check cache validity
+        if !forceReload && isDataLoaded, let lastLoad = lastLoadTime {
+            let timeSinceLastLoad = Date().timeIntervalSince(lastLoad)
+            if timeSinceLastLoad < cacheValidityDuration {
+                // Cache is still valid, skip reload
+                return
+            }
+        }
+        
         isLoading = true
-        defer { isLoading = false }
+        defer { 
+            isLoading = false
+            lastLoadTime = Date()
+            isDataLoaded = true
+        }
         
         // Load current user ID
         if let userData = UserDefaults.standard.data(forKey: "userData"),
@@ -561,7 +579,8 @@ class ChatsViewModel {
     @objc
     private func reloadConversations() {
         Task {
-            await loadConversations()
+            // Force reload when conversation is created or message is sent
+            await loadConversations(forceReload: true)
         }
     }
 

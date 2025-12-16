@@ -35,6 +35,10 @@ final class ChatViewModel: ObservableObject {
     private let messagesPerPage = 50
     private var oldestLoadedMessageId: UUID?
     private var totalMessagesLoaded: Int = 0
+    
+    // MARK: - Static Cache for Messages
+    private static var messageCache: [UUID: (messages: [MessageDisplay], lastLoadTime: Date)] = [:]
+    private static let cacheValidityDuration: TimeInterval = 60 // Cache valid for 60 seconds
 
     // MARK: - Initialization
     init(recipientId: UUID, recipientName: String, recipientUsername: String? = nil, recipientAvatarUrl: String? = nil, isRecipientOnline: Bool = true, conversationId: UUID? = nil) {
@@ -167,9 +171,30 @@ final class ChatViewModel: ObservableObject {
         }
     }
     
-    private func loadMessages() async {
+    private func loadMessages(forceReload: Bool = false) async {
         guard let conversationId = conversationId else {
             return
+        }
+        
+        // Check cache first
+        if !forceReload {
+            let cached = Self.messageCache[conversationId]
+            if let cached = cached {
+                let timeSinceLastLoad = Date().timeIntervalSince(cached.lastLoadTime)
+                if timeSinceLastLoad < Self.cacheValidityDuration {
+                    // Use cached messages
+                    await MainActor.run {
+                        messages = cached.messages
+                        hasMoreMessages = cached.messages.count >= messagesPerPage
+                        totalMessagesLoaded = cached.messages.count
+                        if let oldestMessage = cached.messages.first {
+                            oldestLoadedMessageId = oldestMessage.id
+                        }
+                        isLoading = false
+                    }
+                    return
+                }
+            }
         }
         
         do {
@@ -210,6 +235,9 @@ final class ChatViewModel: ObservableObject {
             if let currentUserId = currentUserId {
                 let displayMessages = lastMessages.map { MessageDisplay(from: $0, currentUserId: currentUserId, recipientId: recipientId) }
                 let sortedMessages = displayMessages.sorted { $0.timestamp < $1.timestamp }
+                
+                // Update cache
+                Self.messageCache[conversationId] = (messages: sortedMessages, lastLoadTime: Date())
                 
                 await MainActor.run {
                     messages = sortedMessages
@@ -311,6 +339,9 @@ final class ChatViewModel: ObservableObject {
                         oldestLoadedMessageId = oldestMessage.id
                     }
                     isLoadingOlderMessages = false
+                    
+                    // Update cache
+                    Self.messageCache[conversationId] = (messages: messages, lastLoadTime: Date())
                 }
             } else {
                 await MainActor.run {
@@ -365,11 +396,42 @@ final class ChatViewModel: ObservableObject {
                     self.messages.append(displayMessage)
                     self.messages.sort { $0.timestamp < $1.timestamp }
                     
+                    // Update cache
+                    if let conversationId = self.conversationId {
+                        Self.messageCache[conversationId] = (messages: self.messages, lastLoadTime: Date())
+                    }
+                    
+                    // Always reload message from API after receiving via WebSocket
+                    // This ensures we get the latest media data, even if it was uploaded after message was sent
+                    Task {
+                        // Small delay to allow media upload to complete (if any)
+                        try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                        await self.reloadMessage(messageId: displayMessage.id)
+                    }
+                    
                     // If user is not at bottom, increment unread count
                     if !self.isAtBottom {
                         self.unreadMessageCount += 1
                     }
                 } else {
+                    // Message exists - update it if new version has more media
+                    if let existingIndex = self.messages.firstIndex(where: { $0.id == displayMessage.id }) {
+                        let existingMessage = self.messages[existingIndex]
+                        // If new message has more media than existing, update it
+                        if displayMessage.media.count > existingMessage.media.count {
+                            self.messages[existingIndex] = displayMessage
+                            // Update cache
+                            if let conversationId = self.conversationId {
+                                Self.messageCache[conversationId] = (messages: self.messages, lastLoadTime: Date())
+                            }
+                        } else if displayMessage.media.isEmpty && existingMessage.media.isEmpty {
+                            // Both have no media - reload from API to check for media
+                            Task {
+                                try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+                                await self.reloadMessage(messageId: displayMessage.id)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -603,6 +665,9 @@ final class ChatViewModel: ObservableObject {
                     messages.append(updatedDisplayMessage)
                     messages.sort { $0.timestamp < $1.timestamp }
                 }
+                
+                // Update cache
+                Self.messageCache[conversationId] = (messages: messages, lastLoadTime: Date())
             } else {
             }
         } catch {

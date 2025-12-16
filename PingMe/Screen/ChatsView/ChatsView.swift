@@ -110,9 +110,9 @@ struct ChatsView: View {
                 }
             }
             .onAppear {
-                // Reload conversations when view appears (e.g., when returning from chat)
+                // Load conversations only if not cached (cache valid for 30 seconds)
                 Task {
-                    await viewModel.loadConversations()
+                    await viewModel.loadConversations(forceReload: false)
                 }
             }
         }
