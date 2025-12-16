@@ -127,19 +127,22 @@ struct RegistrationView: View {
                                     .zIndex(1)
                                     .offset(x: 16, y: 10)
 
-                                SecureField("", text: $viewModel.password)
-                                    .onChange(of: viewModel.password) { _, _ in
+                                PasswordField(
+                                    text: $viewModel.password,
+                                    placeholder: "",
+                                    onValidate: {
                                         viewModel.validatePassword()
                                         viewModel.validatePasswordMatch()
                                     }
-                                    .padding()
-                                    .frame(width: 322, height: 60)
-                                    .background(Color(hex: "#CADDAD"))
-                                    .cornerRadius(8)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8).stroke(
-                                            viewModel.isValidPassword ? Color.black : Color.red,
-                                            lineWidth: 1))
+                                )
+                                .padding()
+                                .frame(width: 322, height: 60)
+                                .background(Color(hex: "#CADDAD"))
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8).stroke(
+                                        viewModel.isValidPassword ? Color.black : Color.red,
+                                        lineWidth: 1))
                                 if !viewModel.passwordErrorMessage.isEmpty {
                                     Text(viewModel.passwordErrorMessage)
                                         .font(.caption)
@@ -160,19 +163,22 @@ struct RegistrationView: View {
                                     .zIndex(1)
                                     .offset(x: 16, y: 10)
 
-                                SecureField("", text: $viewModel.confirmPassword)
-                                    .onChange(of: viewModel.confirmPassword) { _, _ in
+                                PasswordField(
+                                    text: $viewModel.confirmPassword,
+                                    placeholder: "",
+                                    onValidate: {
                                         viewModel.validatePassword()
                                         viewModel.validatePasswordMatch()
                                     }
-                                    .padding()
-                                    .frame(width: 322, height: 60)
-                                    .background(Color(hex: "#CADDAD"))
-                                    .cornerRadius(8)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8).stroke(
-                                            viewModel.isValidPasswordMatch
-                                                ? Color.black : Color.red, lineWidth: 1))
+                                )
+                                .padding()
+                                .frame(width: 322, height: 60)
+                                .background(Color(hex: "#CADDAD"))
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8).stroke(
+                                        viewModel.isValidPasswordMatch
+                                            ? Color.black : Color.red, lineWidth: 1))
                                 if !viewModel.confirmPasswordErrorMessage.isEmpty {
                                     Text(viewModel.confirmPasswordErrorMessage)
                                         .font(.caption)
