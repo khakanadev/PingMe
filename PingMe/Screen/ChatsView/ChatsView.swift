@@ -44,7 +44,7 @@ struct ChatsView: View {
                                     Spacer()
                                 }
                             } else {
-                                chatsList
+                            chatsList
                             }
                         }
                     }
@@ -149,8 +149,8 @@ struct ChatsView: View {
                         recipientAvatarUrl: chatData.recipientAvatarUrl,
                         isRecipientOnline: chatData.isRecipientOnline
                     )
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
 
                     Divider()
                         .background(Color(uiColor: .systemGray5))
@@ -241,8 +241,8 @@ struct ChatRowView: View {
                                 .frame(width: 60, height: 60)
                                 .clipShape(Circle())
                         } placeholder: {
-                            Circle()
-                                .fill(Color(uiColor: .systemGray5))
+                Circle()
+                    .fill(Color(uiColor: .systemGray5))
                                 .frame(width: 60, height: 60)
                                 .overlay(
                                     ProgressView()
@@ -282,7 +282,7 @@ struct ChatRowView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text(recipientName)
-                            .font(.system(size: 16, weight: .semibold))
+                        .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(.black)
                             .lineLimit(1)
                         
@@ -292,7 +292,7 @@ struct ChatRowView: View {
                             .font(.system(size: 13))
                             .foregroundColor(.gray)
                     }
-                    
+
                     Text(chat.lastMessage)
                         .font(.system(size: 14))
                         .foregroundColor(.gray)
@@ -303,7 +303,7 @@ struct ChatRowView: View {
             .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle()) // Make entire row tappable
-        }
+            }
         .buttonStyle(PlainButtonStyle())
     }
 }

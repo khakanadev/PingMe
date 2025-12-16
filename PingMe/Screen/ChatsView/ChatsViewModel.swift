@@ -1,5 +1,7 @@
+// swiftlint:disable type_body_length cyclomatic_complexity line_length
 import Foundation
 import Observation
+import SwiftUI
 
 extension Notification.Name {
     static let userDataUpdated = Notification.Name("userDataUpdated")
@@ -53,10 +55,18 @@ class ChatsViewModel {
     private var conversationParticipants: [UUID: [ConversationParticipant]] = [:]
     
     // MARK: - Conversation Recipient Mapping
-    // Store mapping of conversationId -> recipient data for conversations where all messages are from current user
-    private var _conversationRecipientMap: [UUID: (userId: UUID, userName: String, username: String?, avatarUrl: String?, isOnline: Bool)] = [:]
+    struct RecipientMeta: Codable, Hashable {
+        let userId: UUID
+        let userName: String
+        let username: String?
+        let avatarUrl: String?
+        let isOnline: Bool
+    }
     
-    private var conversationRecipientMap: [UUID: (userId: UUID, userName: String, username: String?, avatarUrl: String?, isOnline: Bool)] {
+    // Store mapping of conversationId -> recipient data for conversations where all messages are from current user
+    private var _conversationRecipientMap: [UUID: RecipientMeta] = [:]
+    
+    private var conversationRecipientMap: [UUID: RecipientMeta] {
         get { _conversationRecipientMap }
         set {
             _conversationRecipientMap = newValue
@@ -66,13 +76,12 @@ class ChatsViewModel {
     }
     
     private func loadRecipientMap() {
-        print("🔵 ChatsViewModel: loadRecipientMap called")
         if let data = UserDefaults.standard.data(forKey: "conversationRecipientMap"),
            let decoded = try? JSONDecoder().decode([String: RecipientData].self, from: data) {
             // Load into backing storage without triggering setter
-            let tempMap = decoded.reduce(into: [UUID: (userId: UUID, userName: String, username: String?, avatarUrl: String?, isOnline: Bool)]()) { result, pair in
+            let tempMap = decoded.reduce(into: [UUID: RecipientMeta]()) { result, pair in
                 if let conversationId = UUID(uuidString: pair.key) {
-                    result[conversationId] = (
+                    result[conversationId] = RecipientMeta(
                         userId: pair.value.userId,
                         userName: pair.value.userName,
                         username: pair.value.username,
@@ -82,30 +91,26 @@ class ChatsViewModel {
                 }
             }
             _conversationRecipientMap = tempMap
-            print("🔵 ChatsViewModel: ✅ Loaded \(conversationRecipientMap.count) recipient mappings from UserDefaults")
             for (id, data) in conversationRecipientMap {
-                print("🔵 ChatsViewModel:   - conversation \(id): userId=\(data.userId), userName=\(data.userName)")
             }
         } else {
-            print("🔵 ChatsViewModel: No recipient mappings found in UserDefaults")
         }
     }
     
     private func saveRecipientMap() {
         let encoded = _conversationRecipientMap.reduce(into: [String: RecipientData]()) { result, pair in
+            let meta = pair.value
             result[pair.key.uuidString] = RecipientData(
-                userId: pair.value.userId,
-                userName: pair.value.userName,
-                username: pair.value.username,
-                avatarUrl: pair.value.avatarUrl,
-                isOnline: pair.value.isOnline
+                userId: meta.userId,
+                userName: meta.userName,
+                username: meta.username,
+                avatarUrl: meta.avatarUrl,
+                isOnline: meta.isOnline
             )
         }
         if let data = try? JSONEncoder().encode(encoded) {
             UserDefaults.standard.set(data, forKey: "conversationRecipientMap")
-            print("🔵 ChatsViewModel: ✅ Saved \(_conversationRecipientMap.count) recipient mappings to UserDefaults")
         } else {
-            print("🔵 ChatsViewModel: ⚠️ Failed to encode recipient mappings")
         }
     }
     
@@ -178,70 +183,41 @@ class ChatsViewModel {
         do {
             let response = try await conversationService.getConversations()
             
-            print("🔵 ChatsViewModel: loadConversations - response.success: \(response.success)")
             
             if response.success, let conversations = response.data {
-                print("🔵 ChatsViewModel: Loaded \(conversations.count) conversations from API")
                 
-                // Log details for each conversation
-                for conversation in conversations {
-                    print("🔵 ChatsViewModel: Conversation \(conversation.id):")
-                    print("   - isDeleted: \(conversation.isDeleted)")
-                    print("   - isGroup: \(conversation.isGroup)")
-                    print("   - name: \(conversation.name ?? "nil")")
-                    print("   - participants count: \(conversation.participants?.count ?? 0)")
-                    print("   - has lastMessage: \(conversation.lastMessage != nil)")
-                    if let lastMessage = conversation.lastMessage {
-                        print("   - lastMessage content: \(lastMessage.content)")
-                        print("   - lastMessage sender: \(lastMessage.sender?.name ?? "nil")")
-                        print("   - lastMessage sender username: \(lastMessage.sender?.username ?? "nil")")
-                        print("   - lastMessage sender avatarUrl: \(lastMessage.sender?.avatarUrl ?? "nil")")
-                    }
-                    if let participants = conversation.participants {
-                        for participant in participants {
-                            print("   - participant: \(participant.userName) (id: \(participant.userId), avatar: \(participant.userAvatarUrl ?? "nil"))")
-                        }
-                    }
-                }
                 
                 // Filter out only deleted conversations - include all others
                 // API may not return participants/lastMessage in list, but we'll handle that in convertToChat
                 let validConversations = conversations.filter { conversation in
                     if conversation.isDeleted {
-                        print("🔵 ChatsViewModel: Excluding conversation \(conversation.id) - is deleted")
                         return false
                     }
                     
                     // Include all non-deleted conversations
                     // If participants are missing, we'll try to load them or use fallback values
-                    print("🔵 ChatsViewModel: Including conversation \(conversation.id) - not deleted")
                     return true
                 }
                 
-                print("🔵 ChatsViewModel: After filtering: \(validConversations.count) valid conversations")
                 
                 // If participants or lastMessage are missing, try to load messages to get user data
                 var enrichedConversations = validConversations
                 if validConversations.contains(where: { ($0.participants == nil || $0.participants?.isEmpty == true) || $0.lastMessage == nil }) {
-                    print("🔵 ChatsViewModel: Some conversations missing participants or lastMessage, loading messages...")
                     var enriched: [Conversation] = []
                     for conversation in validConversations {
                         var enrichedConversation = conversation
                         
                         // If missing participants or lastMessage, try to get data from messages
                         if (conversation.participants == nil || conversation.participants?.isEmpty == true) || conversation.lastMessage == nil {
-                            print("🔵 ChatsViewModel: Loading messages for conversation \(conversation.id) to get user data...")
                             do {
                                 let messagesResponse = try await conversationService.getMessages(conversationId: conversation.id, skip: 0, limit: 20)
                                 if let messages = messagesResponse.data, !messages.isEmpty {
-                                    print("🔵 ChatsViewModel: Loaded \(messages.count) messages for conversation \(conversation.id)")
                                     
                                     // Get the most recent message as lastMessage
                                     let sortedMessages = messages.sorted { $0.createdAt > $1.createdAt }
                                     let lastMsg = sortedMessages.first
                                     
                                     if let lastMsg = lastMsg {
-                                        print("🔵 ChatsViewModel: Using message \(lastMsg.id) as lastMessage: \(lastMsg.content)")
                                         enrichedConversation = Conversation(
                                             id: conversation.id,
                                             name: conversation.name,
@@ -259,12 +235,9 @@ class ChatsViewModel {
                                     
                                     // Try to extract participant data from messages if participants are missing
                                     if conversation.participants == nil || conversation.participants?.isEmpty == true {
-                                        print("🔵 ChatsViewModel: Extracting participant data from messages...")
-                                        print("🔵 ChatsViewModel: Checking \(messages.count) messages for other user...")
                                         
                                         // Log all message senders
                                         for (index, message) in messages.enumerated() {
-                                            print("🔵 ChatsViewModel: Message \(index): senderId=\(message.senderId), sender=\(message.sender?.name ?? "nil"), isCurrentUser=\(message.senderId == currentUserId)")
                                         }
                                         
                                         // Find a message from a user who is not the current user
@@ -275,7 +248,6 @@ class ChatsViewModel {
                                             $0.senderId != currentUserId && $0.sender != nil 
                                         }),
                                            let sender = otherUserMessage.sender {
-                                            print("🔵 ChatsViewModel: ✅ Found other user in messages with sender object: \(sender.name) (id: \(sender.id), username: \(sender.username ?? "nil"), avatarUrl: \(sender.avatarUrl ?? "nil"))")
                                             foundParticipant = ConversationParticipant(
                                                 id: UUID(),
                                                 userId: sender.id,
@@ -290,14 +262,11 @@ class ChatsViewModel {
                                                 msg.senderId != currentUserId ? msg.senderId : nil
                                             })
                                             
-                                            print("🔵 ChatsViewModel: Found \(otherUserIds.count) unique other user IDs: \(otherUserIds.map { $0.uuidString })")
                                             
                                             if let otherUserId = otherUserIds.first {
-                                                print("🔵 ChatsViewModel: Trying to get user data for ID: \(otherUserId)")
                                                 // Try to get user data from messages - check if any message has sender with this ID
                                                 for message in messages {
                                                     if message.senderId == otherUserId, let sender = message.sender {
-                                                        print("🔵 ChatsViewModel: ✅ Found sender data in message: \(sender.name)")
                                                         foundParticipant = ConversationParticipant(
                                                             id: UUID(),
                                                             userId: sender.id,
@@ -312,7 +281,6 @@ class ChatsViewModel {
                                                 
                                                 // If still no participant, create one with minimal data
                                                 if foundParticipant == nil {
-                                                    print("🔵 ChatsViewModel: ⚠️ No sender data in messages, creating minimal participant for ID: \(otherUserId)")
                                                     // We'll need to fetch user data from API, but for now create minimal participant
                                                     // This will be handled in convertToChatData by using lastMessage.sender
                                                 }
@@ -334,16 +302,11 @@ class ChatsViewModel {
                                                 deletedAt: conversation.deletedAt,
                                                 avatarUrl: conversation.avatarUrl
                                             )
-                                            print("🔵 ChatsViewModel: ✅ Enriched conversation with participant: \(participant.userName) and lastMessage: \(lastMsgToUse?.content ?? "nil")")
                                         } else {
-                                            print("🔵 ChatsViewModel: ⚠️ Could not create participant from messages")
-                                            print("🔵 ChatsViewModel: All messages are from current user - this is a new chat")
-                                            print("🔵 ChatsViewModel: Will need to get recipient data when opening chat")
                                         }
                                     }
                                 }
                             } catch {
-                                print("🔵 ChatsViewModel: Failed to load messages for \(conversation.id): \(error)")
                             }
                         }
                         
@@ -353,35 +316,17 @@ class ChatsViewModel {
                 }
                 
                 chats = enrichedConversations.map { conversation in
-                    let chat = convertToChat(from: conversation)
-                    print("🔵 ChatsViewModel: Created Chat for conversation \(conversation.id):")
-                    print("   - username: \(chat.username)")
-                    print("   - lastMessage: \(chat.lastMessage)")
-                    print("   - avatarUrl: \(chat.avatarUrl ?? "nil")")
-                    return chat
+                    convertToChat(from: conversation)
                 }
                 // Sort by last message time (most recent first)
                 chats.sort { $0.lastMessageTime > $1.lastMessageTime }
                 
-                print("🔵 ChatsViewModel: Created \(chats.count) chats")
                 
                 // Also store ChatData for navigation
                 chatDataList = convertToChatData(from: enrichedConversations)
                 chatDataList.sort { $0.chat.lastMessageTime > $1.chat.lastMessageTime }
-                
-                print("🔵 ChatsViewModel: Created \(chatDataList.count) chatData items")
-                for chatData in chatDataList {
-                    print("🔵 ChatsViewModel: ChatData \(chatData.id):")
-                    print("   - recipientName: \(chatData.recipientName)")
-                    print("   - recipientUsername: \(chatData.recipientUsername ?? "nil")")
-                    print("   - recipientAvatarUrl: \(chatData.recipientAvatarUrl ?? "nil")")
-                    print("   - recipientId: \(chatData.recipientId?.uuidString ?? "nil")")
-                    print("   - isRecipientOnline: \(chatData.isRecipientOnline)")
-                    print("   - chat.lastMessage: \(chatData.chat.lastMessage)")
-                }
             } else {
                 // If no conversations or error, show empty list
-                print("🔵 ChatsViewModel: No conversations or error - response.success: \(response.success), error: \(response.error ?? "none")")
                 chats = []
                 chatDataList = []
                 if let error = response.error {
@@ -389,7 +334,6 @@ class ChatsViewModel {
                 }
             }
         } catch {
-            print("🔵 ChatsViewModel: Error loading conversations: \(error)")
             errorMessage = "Не удалось загрузить чаты: \(error.localizedDescription)"
             chats = []
             chatDataList = []
@@ -451,7 +395,17 @@ class ChatsViewModel {
             if lastMessage.isDeleted {
                 lastMessageText = "Сообщение удалено"
             } else {
-                lastMessageText = lastMessage.content
+                // Check if message has only media (no text or only whitespace)
+                let trimmedContent = lastMessage.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                let hasText = !trimmedContent.isEmpty
+                let hasMedia = !lastMessage.media.isEmpty
+                
+                if !hasText && hasMedia {
+                    // Message contains only media, show "Фото"
+                    lastMessageText = "Фото"
+                } else {
+                    lastMessageText = lastMessage.content
+                }
             }
         } else {
             lastMessageText = "Нет сообщений"
@@ -485,20 +439,13 @@ class ChatsViewModel {
     
     // MARK: - Convert Conversations to ChatData
     private func convertToChatData(from conversations: [Conversation]) -> [ChatData] {
-        print("🔵 ChatsViewModel: convertToChatData called for \(conversations.count) conversations")
-        print("🔵 ChatsViewModel: currentUserId: \(currentUserId?.uuidString ?? "nil")")
         
         return conversations.map { conversation in
-            print("🔵 ChatsViewModel: Processing conversation \(conversation.id)")
             
             let otherParticipant = conversation.participants?.first { participant in
                 participant.userId != currentUserId
             }
             
-            print("🔵 ChatsViewModel: otherParticipant: \(otherParticipant?.userName ?? "nil") (id: \(otherParticipant?.userId.uuidString ?? "nil"))")
-            print("🔵 ChatsViewModel: conversation.lastMessage: \(conversation.lastMessage?.content ?? "nil")")
-            print("🔵 ChatsViewModel: conversation.lastMessage.sender: \(conversation.lastMessage?.sender?.name ?? "nil")")
-            print("🔵 ChatsViewModel: conversation.lastMessage.senderId: \(conversation.lastMessage?.senderId.uuidString ?? "nil")")
             
             let chatName: String
             let recipientUsername: String?
@@ -508,7 +455,6 @@ class ChatsViewModel {
                 chatName = conversation.name ?? "Группа"
                 recipientUsername = nil
                 recipientAvatarUrl = conversation.avatarUrl
-                print("🔵 ChatsViewModel: Group chat - name: \(chatName), avatarUrl: \(recipientAvatarUrl ?? "nil")")
             } else {
                 // Priority 1: lastMessage.sender has most complete data (including username)
                 if let lastMessage = conversation.lastMessage,
@@ -518,61 +464,36 @@ class ChatsViewModel {
                     chatName = sender.name
                     recipientUsername = sender.username
                     recipientAvatarUrl = sender.avatarUrl
-                    print("🔵 ChatsViewModel: ✅ Using lastMessage.sender data:")
-                    print("   - name: \(chatName)")
-                    print("   - username: \(recipientUsername ?? "nil")")
-                    print("   - avatarUrl: \(recipientAvatarUrl ?? "nil")")
                 } else if let participant = otherParticipant {
                     // Priority 2: Fallback to participant data (no username available)
                     chatName = participant.userName
                     recipientUsername = nil // ConversationParticipant doesn't have username
                     recipientAvatarUrl = participant.userAvatarUrl
-                    print("🔵 ChatsViewModel: ✅ Using participant data:")
-                    print("   - name: \(chatName)")
-                    print("   - username: nil (not available in participant)")
-                    print("   - avatarUrl: \(recipientAvatarUrl ?? "nil")")
                 } else if let lastMessage = conversation.lastMessage,
                           lastMessage.senderId != currentUserId {
                     // Priority 3: Use lastMessage senderName even if sender object is missing
                     chatName = lastMessage.senderName
                     recipientUsername = nil
                     recipientAvatarUrl = nil
-                    print("🔵 ChatsViewModel: ⚠️ Using lastMessage.senderName (no sender object):")
-                    print("   - name: \(chatName)")
-                    print("   - senderId: \(lastMessage.senderId.uuidString)")
                 } else if let lastMessage = conversation.lastMessage,
                           lastMessage.senderId == currentUserId {
                     // All messages from current user - check if we have recipient data stored
-                    print("🔵 ChatsViewModel: Checking conversationRecipientMap for conversation \(conversation.id)")
-                    print("🔵 ChatsViewModel: conversationRecipientMap keys: \(conversationRecipientMap.keys.map { $0.uuidString })")
                     if let recipientData = conversationRecipientMap[conversation.id] {
                         chatName = recipientData.userName
                         recipientUsername = recipientData.username
                         recipientAvatarUrl = recipientData.avatarUrl
-                        print("🔵 ChatsViewModel: ✅ Using stored recipient data for conversation \(conversation.id):")
-                        print("   - name: \(chatName)")
-                        print("   - username: \(recipientUsername ?? "nil")")
-                        print("   - avatarUrl: \(recipientAvatarUrl ?? "nil")")
                     } else {
                         // No stored data - try to get from conversation name or use fallback
                         // For now, use fallback - data will be loaded when chat is opened
                         chatName = conversation.name?.isEmpty == false ? conversation.name! : "Новый чат"
                         recipientUsername = nil
                         recipientAvatarUrl = nil
-                        print("🔵 ChatsViewModel: ⚠️ All messages from current user - no stored recipient data:")
-                        print("   - name: \(chatName)")
-                        print("   - conversationRecipientMap.count: \(conversationRecipientMap.count)")
-                        print("   - Will load data when chat is opened")
                     }
                 } else {
                     // Last resort: use conversation name or fallback
                     chatName = conversation.name ?? "Чат"
                     recipientUsername = nil
                     recipientAvatarUrl = conversation.avatarUrl
-                    print("🔵 ChatsViewModel: ⚠️ Using fallback data:")
-                    print("   - name: \(chatName)")
-                    print("   - username: nil")
-                    print("   - avatarUrl: \(recipientAvatarUrl ?? "nil")")
                 }
             }
             
@@ -586,27 +507,22 @@ class ChatsViewModel {
                sender.id != currentUserId {
                 recipientId = sender.id
                 isRecipientOnline = sender.isOnline
-                print("🔵 ChatsViewModel: recipientId from lastMessage.sender: \(recipientId?.uuidString ?? "nil")")
             } else if let participant = otherParticipant {
                 // Priority 2: Use participant ID
                 recipientId = participant.userId
                 isRecipientOnline = participant.isOnline
-                print("🔵 ChatsViewModel: recipientId from participant: \(recipientId?.uuidString ?? "nil")")
             } else if let lastMessage = conversation.lastMessage,
                       lastMessage.senderId != currentUserId {
                 // Priority 3: Use senderId even if sender object is missing
                 recipientId = lastMessage.senderId
                 isRecipientOnline = false
-                print("🔵 ChatsViewModel: recipientId from lastMessage.senderId: \(recipientId?.uuidString ?? "nil")")
             } else if let recipientData = conversationRecipientMap[conversation.id] {
                 // Priority 4: Use stored recipient data (for conversations where all messages are from current user)
                 recipientId = recipientData.userId
                 isRecipientOnline = recipientData.isOnline
-                print("🔵 ChatsViewModel: recipientId from stored recipient data: \(recipientId?.uuidString ?? "nil")")
             } else {
                 recipientId = nil
                 isRecipientOnline = false
-                print("🔵 ChatsViewModel: recipientId: nil (no data available)")
             }
             
             let chatData = ChatData(
@@ -618,11 +534,6 @@ class ChatsViewModel {
                 isRecipientOnline: isRecipientOnline
             )
             
-            print("🔵 ChatsViewModel: Created ChatData for conversation \(conversation.id):")
-            print("   - recipientName: \(chatData.recipientName)")
-            print("   - recipientUsername: \(chatData.recipientUsername ?? "nil")")
-            print("   - recipientAvatarUrl: \(chatData.recipientAvatarUrl ?? "nil")")
-            print("   - recipientId: \(chatData.recipientId?.uuidString ?? "nil")")
             
             return chatData
         }
@@ -639,7 +550,6 @@ class ChatsViewModel {
             avatarUrl = user.avatarUrl
             currentUser = Story(username: username, avatarUrl: user.avatarUrl)
         } catch {
-            print("Failed to decode user data: \(error)")
         }
     }
 
@@ -657,7 +567,6 @@ class ChatsViewModel {
 
     // MARK: - Chat Management
     func openChat(with userId: UUID, userName: String, isOnline: Bool) {
-        print("🔵 ChatsViewModel: openChat called for userId: \(userId), userName: \(userName)")
         Task {
             await openChatAsync(with: userId, userName: userName, isOnline: isOnline)
         }
@@ -665,7 +574,6 @@ class ChatsViewModel {
     
     @MainActor
     private func openChatAsync(with userId: UUID, userName: String, isOnline: Bool) async {
-        print("🔵 ChatsViewModel: openChatAsync called for userId: \(userId), userName: \(userName)")
         
         // Use findOrCreateConversation to avoid creating duplicate chats
         do {
@@ -673,14 +581,11 @@ class ChatsViewModel {
             
             if response.success, let conversation = response.data {
                 // Found or created conversation - open it
-                print("🔵 ChatsViewModel: ✅ Found/created conversation \(conversation.id) for user \(userId)")
                 
                 // Check if this is a new conversation or existing one
                 if let participants = conversation.participants,
                    participants.contains(where: { $0.userId == userId }) {
-                    print("🔵 ChatsViewModel: This is an EXISTING conversation with messages")
                 } else {
-                    print("🔵 ChatsViewModel: This is a NEW conversation (no participants info)")
                 }
                 
                 // Try to get full user data (username, avatarUrl) from API
@@ -694,18 +599,20 @@ class ChatsViewModel {
                         username = user.username
                         avatarUrl = user.avatarUrl
                         isOnlineStatus = user.isOnline
-                        print("🔵 ChatsViewModel: ✅ Loaded user data for \(userId): name=\(user.name), username=\(user.username ?? "nil"), avatarUrl=\(user.avatarUrl ?? "nil")")
                     } else {
-                        print("🔵 ChatsViewModel: ⚠️ getUserById returned success=\(userResponse.success), but data is nil")
                     }
                 } catch {
-                    print("🔵 ChatsViewModel: ⚠️ Failed to load user data for \(userId): \(error)")
                     // Continue with provided data
                 }
                 
                 // Store recipient data for this conversation
-                conversationRecipientMap[conversation.id] = (userId: userId, userName: userName, username: username, avatarUrl: avatarUrl, isOnline: isOnlineStatus)
-                print("🔵 ChatsViewModel: Stored recipient data for conversation \(conversation.id): userId=\(userId), userName=\(userName), username=\(username ?? "nil"), avatarUrl=\(avatarUrl ?? "nil")")
+                conversationRecipientMap[conversation.id] = RecipientMeta(
+                    userId: userId,
+                    userName: userName,
+                    username: username,
+                    avatarUrl: avatarUrl,
+                    isOnline: isOnlineStatus
+                )
                 
                 selectedChatInfo = ChatInfo(
                     userId: userId,
@@ -719,7 +626,6 @@ class ChatsViewModel {
                 await loadConversations()
             } else {
                 // If creation failed, still try to open chat (ChatViewModel will handle it)
-                print("🔵 ChatsViewModel: ⚠️ Failed to find/create conversation, opening chat anyway")
                 selectedChatInfo = ChatInfo(
                     userId: userId,
                     userName: userName,
@@ -729,7 +635,6 @@ class ChatsViewModel {
                 isUserProfileActive = false
             }
         } catch {
-            print("🔵 ChatsViewModel: ❌ Error in findOrCreateConversation: \(error)")
             // On error, still try to open chat
             selectedChatInfo = ChatInfo(
                 userId: userId,
@@ -744,25 +649,19 @@ class ChatsViewModel {
     // MARK: - Delete All Conversations (Temporary - for cleanup)
     @MainActor
     func deleteAllConversations() async {
-        print("🔵 ChatsViewModel: Starting to delete all conversations...")
         do {
             let response = try await conversationService.getConversations()
             if let conversations = response.data {
-                print("🔵 ChatsViewModel: Found \(conversations.count) conversations to delete")
                 for conversation in conversations {
                     do {
                         _ = try await conversationService.deleteConversation(id: conversation.id)
-                        print("🔵 ChatsViewModel: Deleted conversation \(conversation.id)")
                     } catch {
-                        print("🔵 ChatsViewModel: Failed to delete conversation \(conversation.id): \(error)")
                     }
                 }
                 // Reload conversations after deletion
                 await loadConversations()
-                print("🔵 ChatsViewModel: Finished deleting conversations")
             }
         } catch {
-            print("🔵 ChatsViewModel: Error loading conversations for deletion: \(error)")
         }
     }
 
