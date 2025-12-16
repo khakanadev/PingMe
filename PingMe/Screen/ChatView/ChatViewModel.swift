@@ -182,7 +182,9 @@ final class ChatViewModel: ObservableObject {
             let cached = Self.messageCache[conversationId]
             if let cached = cached {
                 let timeSinceLastLoad = Date().timeIntervalSince(cached.lastLoadTime)
-                if timeSinceLastLoad < Self.cacheValidityDuration {
+                // Use cache only if it's very fresh (less than 10 seconds)
+                // This ensures we get new messages from other devices quickly
+                if timeSinceLastLoad < 10 {
                     // Use cached messages
                     await MainActor.run {
                         messages = cached.messages
@@ -192,6 +194,10 @@ final class ChatViewModel: ObservableObject {
                             oldestLoadedMessageId = oldestMessage.id
                         }
                         isLoading = false
+                    }
+                    // Still check for new messages in background
+                    Task {
+                        await checkForNewMessages()
                     }
                     return
                 }
@@ -260,6 +266,42 @@ final class ChatViewModel: ObservableObject {
                 errorMessage = errorMsg
                 isLoading = false
             }
+        }
+    }
+    
+    /// Check for new messages by comparing with API
+    func checkForNewMessages() async {
+        guard let conversationId = conversationId,
+              let currentUserId = currentUserId else {
+            return
+        }
+        
+        do {
+            // Load only the last message to check if there are new ones
+            let response = try await conversationService.getMessages(
+                conversationId: conversationId,
+                skip: 0,
+                limit: 1
+            )
+            
+            guard response.success, let apiMessages = response.data, !apiMessages.isEmpty else {
+                return
+            }
+            
+            let lastApiMessage = apiMessages.sorted { $0.createdAt > $1.createdAt }.first
+            
+            await MainActor.run {
+                // Check if we have this message in our cache
+                if let lastApiMessage = lastApiMessage,
+                   !messages.contains(where: { $0.id == lastApiMessage.id }) {
+                    // New message found - reload all messages
+                    Task {
+                        await loadMessages(forceReload: true)
+                    }
+                }
+            }
+        } catch {
+            // Silently fail - this is a background check
         }
     }
     
@@ -451,6 +493,24 @@ final class ChatViewModel: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 self.isRecipientOnline = isOnline
+            }
+        }
+        
+        // Message read handler
+        webSocketService.onMessageRead(conversationId: conversationId) { [weak self] messageId, readerId in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                // Update read status for messages from current user that were read by recipient
+                if let index = self.messages.firstIndex(where: { $0.id == messageId && $0.isFromCurrentUser }) {
+                    // Check if readerId matches recipientId
+                    if readerId == self.recipientId {
+                        self.messages[index].isRead = true
+                        // Update cache
+                        if let conversationId = self.conversationId {
+                            Self.messageCache[conversationId] = (messages: self.messages, lastLoadTime: Date())
+                        }
+                    }
+                }
             }
         }
     }
@@ -752,6 +812,9 @@ final class ChatViewModel: ObservableObject {
         }
         
         guard let conversationId = conversationId else { return }
+        
+        // Remove WebSocket handlers
+        webSocketService.removeMessageReadHandler(conversationId: conversationId)
         
         webSocketService.removeMessageHandler(conversationId: conversationId)
         webSocketService.removeTypingHandler(conversationId: conversationId)

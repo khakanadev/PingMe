@@ -41,16 +41,14 @@ struct RegistrationView: View {
                 VStack(alignment: .leading) {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Registration")
-                            .font(.custom("Inter", size: 40))
-                            .fontWeight(.medium)
+                            .font(.system(size: 40, weight: .medium))
                             .lineSpacing(62.93)
                             .padding(.leading, 21)
 
                         VStack(alignment: .center, spacing: 14) {
                             VStack(alignment: .leading, spacing: 0) {
                                 Text("Your name:")
-                                    .font(.custom("Inter", size: 21))
-                                    .fontWeight(.regular)
+                                    .font(.system(size: 21, weight: .regular))
                                     .foregroundColor(Color(hex: "#525252"))
                                     .padding(.horizontal, 8)
                                     .frame(width: 120, height: 23)
@@ -86,8 +84,7 @@ struct RegistrationView: View {
 
                             VStack(alignment: .leading, spacing: 0) {
                                 Text("E-mail:")
-                                    .font(.custom("Inter", size: 21))
-                                    .fontWeight(.regular)
+                                    .font(.system(size: 21, weight: .regular))
                                     .foregroundColor(Color(hex: "#525252"))
                                     .padding(.horizontal, 8)
                                     .frame(width: 95, height: 23)
@@ -118,8 +115,7 @@ struct RegistrationView: View {
 
                             VStack(alignment: .leading, spacing: 0) {
                                 Text("Password")
-                                    .font(.custom("Inter", size: 21))
-                                    .fontWeight(.regular)
+                                    .font(.system(size: 21, weight: .regular))
                                     .foregroundColor(Color(hex: "#525252"))
                                     .padding(.horizontal, 8)
                                     .frame(width: 103, height: 23)
@@ -154,8 +150,7 @@ struct RegistrationView: View {
 
                             VStack(alignment: .leading, spacing: 0) {
                                 Text("Confirmation")
-                                    .font(.custom("Inter", size: 21))
-                                    .fontWeight(.regular)
+                                    .font(.system(size: 21, weight: .regular))
                                     .foregroundColor(Color(hex: "#525252"))
                                     .padding(.horizontal, 8)
                                     .frame(width: 190, height: 23)

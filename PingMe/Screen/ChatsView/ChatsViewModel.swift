@@ -7,6 +7,7 @@ extension Notification.Name {
     static let userDataUpdated = Notification.Name("userDataUpdated")
     static let conversationCreated = Notification.Name("conversationCreated")
     static let messageSent = Notification.Name("messageSent")
+    static let conversationViewed = Notification.Name("conversationViewed")
 }
 
 // MARK: - View Model
@@ -150,6 +151,13 @@ class ChatsViewModel {
             self,
             selector: #selector(reloadConversations),
             name: .messageSent,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleConversationViewed),
+            name: .conversationViewed,
             object: nil
         )
         
@@ -445,13 +453,29 @@ class ChatsViewModel {
             avatarUrl = otherParticipant?.userAvatarUrl ?? conversation.avatarUrl
         }
         
+        // Determine if there are unread messages
+        // If lastMessage exists and lastReadMessageId is different (or nil), there are unread messages
+        let hasUnreadMessages: Bool
+        if let lastMessage = conversation.lastMessage {
+            // Check if last message is from current user (we don't show unread for our own messages)
+            if lastMessage.senderId == currentUserId {
+                hasUnreadMessages = false
+            } else {
+                // Message is from other user - check if it's been read
+                hasUnreadMessages = conversation.lastReadMessageId != lastMessage.id
+            }
+        } else {
+            hasUnreadMessages = false
+        }
+        
         return Chat(
             id: conversation.id,
             username: chatName,
             lastMessage: lastMessageText,
             lastMessageTime: lastMessageTime,
             avatarUrl: avatarUrl,
-            isGroup: conversation.isGroup
+            isGroup: conversation.isGroup,
+            hasUnreadMessages: hasUnreadMessages
         )
     }
     
@@ -580,6 +604,14 @@ class ChatsViewModel {
     private func reloadConversations() {
         Task {
             // Force reload when conversation is created or message is sent
+            await loadConversations(forceReload: true)
+        }
+    }
+    
+    @objc
+    private func handleConversationViewed(_ notification: Notification) {
+        // When a conversation is viewed, reload to update unread status
+        Task {
             await loadConversations(forceReload: true)
         }
     }

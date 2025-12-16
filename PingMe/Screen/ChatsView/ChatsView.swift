@@ -304,11 +304,20 @@ struct ChatRowView: View {
                             .foregroundColor(.gray)
                     }
 
-                    Text(chat.lastMessage)
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+                    HStack(spacing: 4) {
+                        Text(chat.lastMessage)
+                            .font(.system(size: 14))
+                            .foregroundColor(.gray)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        
+                        // Unread message indicator
+                        if chat.hasUnreadMessages {
+                            Circle()
+                                .fill(Color(hex: "#CADDAD"))
+                                .frame(width: 8, height: 8)
+                        }
+                    }
                 }
             }
             .padding(.vertical, 4)

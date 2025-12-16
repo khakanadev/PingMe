@@ -81,6 +81,11 @@ struct ChatView: View {
                         updateScrollPosition(proxy: proxy)
                     }
                     .onAppear {
+                        // Always check for new messages when view appears (user returned to chat)
+                        Task {
+                            await viewModel.checkForNewMessages()
+                        }
+                        
                         // Restore scroll position or scroll to bottom immediately without animation
                         if let savedPosition = viewModel.getSavedScrollPosition(),
                            viewModel.messages.contains(where: { $0.id == savedPosition }) {
@@ -156,6 +161,10 @@ struct ChatView: View {
                             .padding(.bottom, 100)
                         }
                     }
+                    .onDisappear {
+                        // Notify that conversation was viewed/read
+                        NotificationCenter.default.post(name: .conversationViewed, object: viewModel.conversationId)
+                    }
                 }
             }
 
@@ -189,6 +198,10 @@ struct ChatView: View {
             // Stop typing when leaving chat
             typingTimer?.invalidate()
             viewModel.stopTyping()
+            // Notify that conversation was viewed/read to update unread indicator
+            if let conversationId = viewModel.conversationId {
+                NotificationCenter.default.post(name: .conversationViewed, object: conversationId)
+            }
             Task { @MainActor in
                 viewModel.cleanup()
             }
@@ -252,9 +265,9 @@ struct ChatView: View {
                             .frame(width: 40, height: 40)
                             .clipShape(Circle())
                     } placeholder: {
-                Circle()
-                    .fill(Color(uiColor: .systemGray5))
-                    .frame(width: 40, height: 40)
+            Circle()
+                .fill(Color(uiColor: .systemGray5))
+                .frame(width: 40, height: 40)
                             .overlay(
                                 ProgressView()
                                     .scaleEffect(0.6)
@@ -283,20 +296,20 @@ struct ChatView: View {
             Button(action: {
                 loadUserProfile()
             }) {
-                VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 2) {
                     Text(viewModel.recipientName.isEmpty ? "Пользователь" : viewModel.recipientName)
-                        .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
 
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(viewModel.isRecipientOnline ? .green : .gray)
-                            .frame(width: 8, height: 8)
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(viewModel.isRecipientOnline ? .green : .gray)
+                        .frame(width: 8, height: 8)
 
-                        Text(viewModel.isRecipientOnline ? "online" : "offline")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                    }
+                    Text(viewModel.isRecipientOnline ? "online" : "offline")
+                        .font(.caption)
+                        .foregroundColor(.gray)
                 }
+            }
             }
             .buttonStyle(PlainButtonStyle())
 
@@ -334,7 +347,7 @@ struct ChatView: View {
                     Spacer()
                 }
             } else {
-                LazyVStack(spacing: 12) {
+        LazyVStack(spacing: 12) {
                     // Load older messages indicator
                     if viewModel.hasMoreMessages && !viewModel.isLoading {
                         HStack {
@@ -377,7 +390,7 @@ struct ChatView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if !viewModel.messages.isEmpty {
-                        ForEach(viewModel.messages) { message in
+            ForEach(viewModel.messages) { message in
                             MessageBubble(
                                 message: message,
                                 onMediaTap: { media in
@@ -390,10 +403,14 @@ struct ChatView: View {
                                 if message.id == viewModel.messages.first?.id {
                                     viewModel.saveScrollPosition(messageId: message.id)
                                 }
+                                
+                                // Mark message as read when it appears on screen (if from other user)
+                                if !message.isFromCurrentUser {
+                                    viewModel.markMessageAsRead(messageId: message.id)
+                                }
                             }
                         }
                     }
-                    
                 }
                 .padding()
             }
@@ -553,10 +570,12 @@ struct ChatView: View {
         }
         .padding()
         .foregroundColor(.black)
-        }
     }
-    
-    // MARK: - User Profile Loading
+}
+}
+
+// MARK: - User Profile Loading Extension
+extension ChatView {
     private func loadUserProfile() {
         guard !isLoadingProfile else { return }
         
@@ -654,6 +673,20 @@ struct MessageBubble: View {
                                                 .font(.caption2)
                                                 .foregroundColor(.white)
                                         }
+                                        
+                                        // Read receipt indicators (only for messages from current user)
+                                        if message.isFromCurrentUser {
+                                            HStack(spacing: 1) {
+                                                Image(systemName: "checkmark")
+                                                    .font(.system(size: 10, weight: .medium))
+                                                if message.isRead {
+                                                    Image(systemName: "checkmark")
+                                                        .font(.system(size: 10, weight: .medium))
+                                                }
+                                            }
+                                            .foregroundColor(message.isRead ? Color(hex: "#8FB86F") : .white.opacity(0.8))
+                                            .frame(width: message.isRead ? 16 : 8, alignment: .trailing)
+                                        }
                                     }
                                     .padding(8)
                                     .background(Color.black.opacity(0.5))
@@ -684,8 +717,23 @@ struct MessageBubble: View {
                                             .font(.caption2)
                                             .foregroundColor(.gray)
                                     }
+                                    
+                                    // Read receipt indicators (only for messages from current user)
+                                    if message.isFromCurrentUser {
+                                        HStack(spacing: 1) {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 10, weight: .medium))
+                                            if message.isRead {
+                                                Image(systemName: "checkmark")
+                                                    .font(.system(size: 10, weight: .medium))
+                                            }
+                                        }
+                                        .foregroundColor(message.isRead ? Color(hex: "#8FB86F") : .gray)
+                                        .frame(width: message.isRead ? 18 : 10, alignment: .trailing)
+                                    }
                                 }
-                            .padding([.trailing, .bottom], 8),
+                            .padding([.trailing, .bottom], 8)
+                            .fixedSize(horizontal: true, vertical: false),
                         alignment: .bottomTrailing
                     )
                     .background(message.isFromCurrentUser ? Color(uiColor: .systemGray5) : .white)

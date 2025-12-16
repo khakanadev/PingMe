@@ -13,6 +13,7 @@ struct Message: Codable, Identifiable {
     let updatedAt: Date
     let isEdited: Bool
     let isDeleted: Bool
+    let readBy: [UUID]?
     
     // Computed property for backward compatibility
     var senderName: String {
@@ -30,6 +31,7 @@ struct Message: Codable, Identifiable {
         case updatedAt = "updated_at"
         case isEdited = "is_edited"
         case isDeleted = "is_deleted"
+        case readBy = "read_by"
     }
     
     init(from decoder: Decoder) throws {
@@ -45,6 +47,28 @@ struct Message: Codable, Identifiable {
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         isEdited = try container.decodeIfPresent(Bool.self, forKey: .isEdited) ?? false
         isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+        // Try to decode readBy - handle various formats safely
+        let decodedReadBy: [UUID]?
+        if container.contains(.readBy) {
+            let isNil = (try? container.decodeNil(forKey: .readBy)) ?? false
+            if !isNil {
+                // Try UUID array first
+                if let uuidArray = try? container.decode([UUID].self, forKey: .readBy) {
+                    decodedReadBy = uuidArray
+                } else if let stringArray = try? container.decode([String].self, forKey: .readBy) {
+                    // Try string array and convert to UUIDs
+                    let uuidArray = stringArray.compactMap { UUID(uuidString: $0) }
+                    decodedReadBy = uuidArray.isEmpty ? nil : uuidArray
+                } else {
+                    decodedReadBy = nil
+                }
+            } else {
+                decodedReadBy = nil
+            }
+        } else {
+            decodedReadBy = nil
+        }
+        self.readBy = decodedReadBy
     }
     
     // MARK: - Manual Initializer
@@ -59,7 +83,8 @@ struct Message: Codable, Identifiable {
         createdAt: Date,
         updatedAt: Date,
         isEdited: Bool,
-        isDeleted: Bool
+        isDeleted: Bool,
+        readBy: [UUID]? = nil
     ) {
         self.id = id
         self.content = content
@@ -72,6 +97,7 @@ struct Message: Codable, Identifiable {
         self.updatedAt = updatedAt
         self.isEdited = isEdited
         self.isDeleted = isDeleted
+        self.readBy = readBy
     }
 }
 
@@ -105,6 +131,7 @@ struct MessageDisplay: Identifiable {
     let isEdited: Bool
     let isDeleted: Bool
     let media: [MessageMedia]
+    var isRead: Bool // Mutable to update when read status changes
     
     init(from message: Message, currentUserId: UUID, recipientId: UUID? = nil) {
         self.id = message.id
@@ -120,6 +147,14 @@ struct MessageDisplay: Identifiable {
         self.isEdited = message.isEdited
         self.isDeleted = message.isDeleted
         self.media = message.media
+        
+        // Check if message is read: if readBy contains recipientId (for messages from current user)
+        // For messages from recipient, we don't show read status
+        if message.senderId == currentUserId, let recipientId = recipientId {
+            self.isRead = message.readBy?.contains(recipientId) ?? false
+        } else {
+            self.isRead = false // Don't show read status for messages from other users
+        }
     }
 }
 

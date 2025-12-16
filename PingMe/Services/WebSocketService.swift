@@ -27,6 +27,7 @@ final class WebSocketService: ObservableObject {
     private var messageHandlers: [UUID: (Message) -> Void] = [:]
     private var typingHandlers: [UUID: (Bool, String) -> Void] = [:]
     private var userStatusHandlers: [UUID: (Bool) -> Void] = [:]
+    private var messageReadHandlers: [UUID: (UUID, UUID) -> Void] = [:] // conversationId: (messageId, readerId) -> Void
     private var errorHandlers: [(String, String?) -> Void] = []
     
     // For waiting message responses
@@ -351,6 +352,17 @@ extension WebSocketService {
                 userStatusHandlers[userId]?(false)
             }
             
+        case .messageRead:
+            if let conversationId = message.conversationId,
+               let messageId = message.messageId,
+               let readerId = message.readerId {
+                messageReadHandlers[conversationId]?(messageId, readerId)
+            }
+            
+        case .markReadSuccess:
+            // Confirmation that we marked a message as read - can be used for UI feedback if needed
+            break
+            
         case .error:
             let code = message.code ?? "UNKNOWN_ERROR"
             let errorMsg = message.message ?? "Unknown error"
@@ -422,7 +434,8 @@ extension WebSocketService {
             createdAt: createdAt,
             updatedAt: updatedAt,
             isEdited: message.isEdited ?? false,
-            isDeleted: message.isDeleted ?? false
+            isDeleted: message.isDeleted ?? false,
+            readBy: nil // Will be updated from API or message_read events
         )
         
         // Notify handlers
@@ -446,6 +459,10 @@ extension WebSocketService {
         userStatusHandlers[userId] = handler
     }
     
+    func onMessageRead(conversationId: UUID, handler: @escaping (UUID, UUID) -> Void) {
+        messageReadHandlers[conversationId] = handler
+    }
+    
     func onError(handler: @escaping (String, String?) -> Void) {
         errorHandlers.append(handler)
     }
@@ -460,6 +477,10 @@ extension WebSocketService {
     
     func removeUserStatusHandler(userId: UUID) {
         userStatusHandlers.removeValue(forKey: userId)
+    }
+    
+    func removeMessageReadHandler(conversationId: UUID) {
+        messageReadHandlers.removeValue(forKey: conversationId)
     }
 }
 

@@ -7,10 +7,11 @@ struct Chat: Identifiable {
     let lastMessageTime: Date
     let avatarUrl: String?
     let isGroup: Bool
+    let hasUnreadMessages: Bool // Indicates if there are unread messages
 
     init(
         id: UUID = UUID(), username: String, lastMessage: String, lastMessageTime: Date,
-        avatarUrl: String? = nil, isGroup: Bool = false
+        avatarUrl: String? = nil, isGroup: Bool = false, hasUnreadMessages: Bool = false
     ) {
         self.id = id
         self.username = username
@@ -18,5 +19,6 @@ struct Chat: Identifiable {
         self.lastMessageTime = lastMessageTime
         self.avatarUrl = avatarUrl
         self.isGroup = isGroup
+        self.hasUnreadMessages = hasUnreadMessages
     }
 }

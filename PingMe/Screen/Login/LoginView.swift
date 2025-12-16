@@ -18,16 +18,14 @@ struct LoginView: View {
             VStack(alignment: .leading) {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Enter")
-                        .font(.custom("Inter", size: 52))
-                        .fontWeight(.medium)
+                        .font(.system(size: 52, weight: .medium))
                         .lineSpacing(62.93)
                         .padding(.leading, 21)
 
                     VStack(alignment: .center, spacing: 14) {
                         VStack(alignment: .leading, spacing: 0) {
                             Text("E-mail:")
-                                .font(.custom("Inter", size: 21))
-                                .fontWeight(.regular)
+                                .font(.system(size: 21, weight: .regular))
                                 .foregroundColor(Color(hex: "#525252"))
                                 .padding(.horizontal, 8)
                                 .frame(width: 97, height: 23)
@@ -59,8 +57,7 @@ struct LoginView: View {
 
                         VStack(alignment: .leading, spacing: 0) {
                             Text("Password")
-                                .font(.custom("Inter", size: 21))
-                                .fontWeight(.regular)
+                                .font(.system(size: 21, weight: .regular))
                                 .foregroundColor(Color(hex: "#525252"))
                                 .padding(.horizontal, 8)
                                 .frame(width: 103, height: 23)
