@@ -31,22 +31,79 @@ final class ImageCacheService {
         
         // Load from network
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            var request = URLRequest(url: url)
+            request.cachePolicy = .returnCacheDataElseLoad
+            let (data, response) = try await URLSession.shared.data(for: request)
             
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let image = UIImage(data: data) else {
+            guard let httpResponse = response as? HTTPURLResponse else {
                 return nil
             }
             
+            guard httpResponse.statusCode == 200 else {
+                return nil
+            }
+            
+            guard let image = UIImage(data: data) else {
+                return nil
+            }
+            
+            
             // Store in both caches
             let cachedResponse = CachedURLResponse(response: httpResponse, data: data)
-            urlCache.storeCachedResponse(cachedResponse, for: URLRequest(url: url))
+            urlCache.storeCachedResponse(cachedResponse, for: request)
             cache.setObject(image, forKey: urlString as NSString)
             
             return image
         } catch {
-            print("Failed to load image: \(error)")
+            return nil
+        }
+    }
+    
+    /// Load media file through API endpoint (for authenticated access)
+    func getMediaImage(mediaId: UUID) async -> UIImage? {
+        let cacheKey = "media_\(mediaId.uuidString)"
+        
+        // Check memory cache first
+        if let cachedImage = cache.object(forKey: cacheKey as NSString) {
+            return cachedImage
+        }
+        
+        guard let token = UserDefaults.standard.string(forKey: "accessToken") else {
+            return nil
+        }
+        
+        let baseURL = "https://pingme-messenger.ru"
+        guard let url = URL(string: "\(baseURL)/api/v1/media/\(mediaId.uuidString)") else {
+            return nil
+        }
+        
+        do {
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.cachePolicy = .returnCacheDataElseLoad
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return nil
+            }
+            
+            guard httpResponse.statusCode == 200 else {
+                return nil
+            }
+            
+            guard let image = UIImage(data: data) else {
+                return nil
+            }
+            
+            
+            // Store in cache
+            cache.setObject(image, forKey: cacheKey as NSString)
+            let cachedResponse = CachedURLResponse(response: httpResponse, data: data)
+            urlCache.storeCachedResponse(cachedResponse, for: request)
+            
+            return image
+        } catch {
             return nil
         }
     }
