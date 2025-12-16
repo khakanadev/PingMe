@@ -462,13 +462,25 @@ struct ChatView: View {
                     }
             }
 
-            TextField("Введите сообщение...", text: $viewModel.newMessageText)
-                .padding(8)
-                .background(Color(uiColor: .systemGray6))
-                .cornerRadius(20)
-                .focused($isInputFocused)
-                    .onChange(of: viewModel.newMessageText) { oldValue in
-                        let newValue = viewModel.newMessageText
+            ZStack(alignment: .topLeading) {
+                // Placeholder text
+                if viewModel.newMessageText.isEmpty {
+                    Text("Введите сообщение...")
+                        .foregroundColor(Color(uiColor: .placeholderText))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 12)
+                        .allowsHitTesting(false)
+                }
+                
+                // Multi-line text editor
+                TextEditor(text: $viewModel.newMessageText)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.clear)
+                    .focused($isInputFocused)
+                    .frame(height: 36)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .onChange(of: viewModel.newMessageText) { oldValue, newValue in
                         if !newValue.isEmpty && oldValue.isEmpty {
                             viewModel.startTyping()
                         }
@@ -481,14 +493,14 @@ struct ChatView: View {
                             }
                         }
                     }
-                .onSubmit {
-                        viewModel.stopTyping()
-                    viewModel.sendMessage()
-                }
+            }
+            .padding(8)
+            .background(Color(uiColor: .systemGray6))
+            .cornerRadius(20)
 
                 Button(action: {
                     viewModel.sendMessage()
-                    isInputFocused = false
+                    // Keep keyboard open after sending for continued typing
                 }) {
                     Image(systemName: "paperplane.fill")
                         .font(.title2)
