@@ -10,6 +10,7 @@ struct SplashView: View {
     @State private var taglineOffset = 20.0
     @State private var taglineOpacity = 0.0
     @Environment(\.routingViewModel) private var routingViewModel
+    private let tokenService = TokenService()
     var body: some View {
         ZStack {
             if !isActive {
@@ -64,15 +65,26 @@ struct SplashView: View {
                 taglineOffset = 0
                 taglineOpacity = 1.0
             }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                withAnimation(.easeIn(duration: 0.3)) {
-                    isActive = true
-                    backgroundOpacity = 0
-                    bellsOpacity = 0
-                    logoOpacity = 0
-                    taglineOpacity = 0
-                    routingViewModel.navigateToScreen(.login)
+            
+            // While splash animations are playing, in параллель проверяем токены
+            Task {
+                // Немного подождём, чтобы анимация успела начаться
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // 1s
+                let isAuthenticated = await tokenService.ensureValidSession()
+                
+                // Дождёмся завершения основной анимации (~2.5s) перед переходом
+                let remainingDelay: UInt64 = 1_500_000_000 // ещё ~1.5s
+                try? await Task.sleep(nanoseconds: remainingDelay)
+                
+                await MainActor.run {
+                    withAnimation(.easeIn(duration: 0.3)) {
+                        isActive = true
+                        backgroundOpacity = 0
+                        bellsOpacity = 0
+                        logoOpacity = 0
+                        taglineOpacity = 0
+                        routingViewModel.navigateToScreen(isAuthenticated ? .chats : .login)
+                    }
                 }
             }
         }
