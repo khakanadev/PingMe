@@ -415,10 +415,11 @@ class ChatsViewModel {
             }
         }
         
-        // Get last message text
+        // Get last message text (with deleted/edited/media-only handling)
         let lastMessageText: String
         if let lastMessage = conversation.lastMessage {
             if lastMessage.isDeleted {
+                // Deleted message
                 lastMessageText = "Сообщение удалено"
             } else {
                 // Check if message has only media (no text or only whitespace)
@@ -429,8 +430,11 @@ class ChatsViewModel {
                 if !hasText && hasMedia {
                     // Message contains only media, show "Фото"
                     lastMessageText = "Фото"
+                } else if lastMessage.isEdited {
+                    // Edited text message
+                    lastMessageText = trimmedContent.isEmpty ? "Сообщение изменено" : "\(trimmedContent) (изменено)"
                 } else {
-                    lastMessageText = lastMessage.content
+                    lastMessageText = trimmedContent.isEmpty ? "Пустое сообщение" : trimmedContent
                 }
             }
         } else {
@@ -610,9 +614,44 @@ class ChatsViewModel {
     
     @objc
     private func handleConversationViewed(_ notification: Notification) {
-        // When a conversation is viewed, reload to update unread status
-        Task {
-            await loadConversations(forceReload: true)
+        // When a conversation is viewed, mark it as read locally without forcing full reload
+        guard let conversationId = notification.object as? UUID else { return }
+        
+        // Update unread flag in chats list
+        if let index = chats.firstIndex(where: { $0.id == conversationId }) {
+            let chat = chats[index]
+            chats[index] = Chat(
+                id: chat.id,
+                username: chat.username,
+                lastMessage: chat.lastMessage,
+                lastMessageTime: chat.lastMessageTime,
+                avatarUrl: chat.avatarUrl,
+                isGroup: chat.isGroup,
+                hasUnreadMessages: false
+            )
+        }
+        
+        // Also update corresponding ChatData entry if needed
+        if let dataIndex = chatDataList.firstIndex(where: { $0.chat.id == conversationId }) {
+            let existing = chatDataList[dataIndex]
+            let updatedChat = Chat(
+                id: existing.chat.id,
+                username: existing.chat.username,
+                lastMessage: existing.chat.lastMessage,
+                lastMessageTime: existing.chat.lastMessageTime,
+                avatarUrl: existing.chat.avatarUrl,
+                isGroup: existing.chat.isGroup,
+                hasUnreadMessages: false
+            )
+            
+            chatDataList[dataIndex] = ChatData(
+                chat: updatedChat,
+                recipientId: existing.recipientId,
+                recipientName: existing.recipientName,
+                recipientUsername: existing.recipientUsername,
+                recipientAvatarUrl: existing.recipientAvatarUrl,
+                isRecipientOnline: existing.isRecipientOnline
+            )
         }
     }
 

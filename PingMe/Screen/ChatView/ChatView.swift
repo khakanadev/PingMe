@@ -18,6 +18,10 @@ struct ChatView: View {
     @State private var scrollViewHeight: CGFloat = 0
     @State private var hasScrolledToBottom: Bool = false
     @State private var savedScrollPosition: UUID? = nil
+    @State private var selectedMessageForActions: MessageDisplay? = nil
+    @State private var isShowingMessageActions: Bool = false
+    @State private var isEditingMessage: Bool = false
+    @State private var editingText: String = ""
 
     // MARK: - Initialization
     init(recipientId: UUID, recipientName: String, recipientUsername: String? = nil, recipientAvatarUrl: String? = nil, isRecipientOnline: Bool = true, conversationId: UUID? = nil) {
@@ -218,6 +222,59 @@ struct ChatView: View {
                 Text(error)
             }
         }
+        .confirmationDialog("", isPresented: $isShowingMessageActions, titleVisibility: .hidden) {
+            if let message = selectedMessageForActions {
+                Button("Редактировать") {
+                    editingText = message.content
+                    isEditingMessage = true
+                }
+                
+                Button("Удалить", role: .destructive) {
+                    Task {
+                        await viewModel.deleteMessage(messageId: message.id)
+                    }
+                }
+            }
+            Button("Отмена", role: .cancel) {
+                selectedMessageForActions = nil
+            }
+        }
+        .sheet(isPresented: $isEditingMessage) {
+            if let message = selectedMessageForActions {
+                NavigationStack {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Редактировать сообщение")
+                            .font(.headline)
+                        
+                        TextEditor(text: $editingText)
+                            .frame(minHeight: 120)
+                            .padding(8)
+                            .background(Color(uiColor: .systemGray6))
+                            .cornerRadius(12)
+                        
+                        Spacer()
+                    }
+                    .padding()
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Отмена") {
+                                isEditingMessage = false
+                            }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Сохранить") {
+                                let newText = editingText
+                                Task {
+                                    await viewModel.editMessage(messageId: message.id, newContent: newText)
+                                }
+                                isEditingMessage = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
         .fullScreenCover(item: $selectedMedia) { media in
             MediaViewerView(mediaId: media.id)
         }
@@ -390,11 +447,17 @@ struct ChatView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if !viewModel.messages.isEmpty {
-            ForEach(viewModel.messages) { message in
+                        ForEach(viewModel.messages) { message in
                             MessageBubble(
                                 message: message,
                                 onMediaTap: { media in
                                     selectedMedia = media
+                                },
+                                onLongPress: {
+                                    // Allow actions only for current user's non-deleted messages
+                                    guard message.isFromCurrentUser, !message.isDeleted else { return }
+                                    selectedMessageForActions = message
+                                    isShowingMessageActions = true
                                 }
                             )
                             .id(message.id)
@@ -625,6 +688,7 @@ extension ChatView {
 struct MessageBubble: View {
     let message: MessageDisplay
     let onMediaTap: (MessageMedia) -> Void
+    let onLongPress: () -> Void
 
     var body: some View {
         HStack {
@@ -744,6 +808,9 @@ struct MessageBubble: View {
             }
 
             if !message.isFromCurrentUser { Spacer() }
+        }
+        .onLongPressGesture {
+            onLongPress()
         }
     }
 }

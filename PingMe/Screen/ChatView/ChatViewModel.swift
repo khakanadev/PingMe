@@ -31,6 +31,7 @@ final class ChatViewModel: ObservableObject {
     private let conversationService = ConversationService()
     private let webSocketService = WebSocketService.shared
     private let mediaService = MediaService()
+    private let messageService = MessageService()
     private var currentUserId: UUID?
     private var isInitializing = false // Prevent multiple initializations
     private let messagesPerPage = 50
@@ -236,8 +237,11 @@ final class ChatViewModel: ObservableObject {
                 }
             }
             
-            // Take only the last messagesPerPage messages
-            let lastMessages = Array(allMessages.suffix(messagesPerPage))
+            // Ensure messages are sorted by creation time (oldest -> newest)
+            let sortedAllMessages = allMessages.sorted { $0.createdAt < $1.createdAt }
+            
+            // Take only the last messagesPerPage messages (newest ones)
+            let lastMessages = Array(sortedAllMessages.suffix(messagesPerPage))
             
             if let currentUserId = currentUserId {
                 let displayMessages = lastMessages.map { MessageDisplay(from: $0, currentUserId: currentUserId, recipientId: recipientId) }
@@ -361,8 +365,11 @@ final class ChatViewModel: ObservableObject {
                 }
             }
             
+            // Ensure older messages are sorted by creation time (oldest -> newest)
+            let sortedOlderMessages = allMessages.sorted { $0.createdAt < $1.createdAt }
+            
             // Take only the messagesPerPage most recent older messages (those closest to our current oldest)
-            let olderMessages = Array(allMessages.suffix(messagesPerPage))
+            let olderMessages = Array(sortedOlderMessages.suffix(messagesPerPage))
             
             if let currentUserId = currentUserId {
                 let displayMessages = olderMessages.map { MessageDisplay(from: $0, currentUserId: currentUserId, recipientId: recipientId) }
@@ -636,6 +643,77 @@ final class ChatViewModel: ObservableObject {
         
         // Notify that message was sent to update chat list
         NotificationCenter.default.post(name: .messageSent, object: nil)
+    }
+
+    // MARK: - Edit / Delete Message
+    
+    /// Edit existing message content (only for current user's messages)
+    func editMessage(messageId: UUID, newContent: String) async {
+        let trimmed = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        
+        do {
+            let response = try await messageService.editMessage(messageId: messageId, content: trimmed)
+            guard response.success, let updatedMessage = response.data, let currentUserId = currentUserId else {
+                await MainActor.run {
+                    self.errorMessage = response.error ?? response.message ?? "Не удалось изменить сообщение"
+                }
+                return
+            }
+            
+            let display = MessageDisplay(from: updatedMessage, currentUserId: currentUserId, recipientId: recipientId)
+            
+            await MainActor.run {
+                if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
+                    self.messages[index] = display
+                    self.messages.sort { $0.timestamp < $1.timestamp }
+                }
+                
+                if let conversationId = self.conversationId {
+                    Self.messageCache[conversationId] = (messages: self.messages, lastLoadTime: Date())
+                }
+                
+                // Notify chats list to refresh last message
+                NotificationCenter.default.post(name: .messageSent, object: nil)
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = "Не удалось изменить сообщение: \(self.describe(error))"
+            }
+        }
+    }
+    
+    /// Delete message (only for current user's messages)
+    func deleteMessage(messageId: UUID) async {
+        do {
+            let response = try await messageService.deleteMessage(messageId: messageId)
+            guard response.success, let updatedMessage = response.data, let currentUserId = currentUserId else {
+                await MainActor.run {
+                    self.errorMessage = response.error ?? response.message ?? "Не удалось удалить сообщение"
+                }
+                return
+            }
+            
+            let display = MessageDisplay(from: updatedMessage, currentUserId: currentUserId, recipientId: recipientId)
+            
+            await MainActor.run {
+                if let index = self.messages.firstIndex(where: { $0.id == messageId }) {
+                    self.messages[index] = display
+                    self.messages.sort { $0.timestamp < $1.timestamp }
+                }
+                
+                if let conversationId = self.conversationId {
+                    Self.messageCache[conversationId] = (messages: self.messages, lastLoadTime: Date())
+                }
+                
+                // Notify chats list to refresh last message
+                NotificationCenter.default.post(name: .messageSent, object: nil)
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = "Не удалось удалить сообщение: \(self.describe(error))"
+            }
+        }
     }
 
     // MARK: - Attachments
